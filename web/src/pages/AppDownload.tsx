@@ -85,15 +85,19 @@ export function AppDownload() {
               >
                 Download .apk
               </a>
-              <div style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", alignItems: "center" }}>
-                <QRCodeSVG value={apk.downloadUrl} size={160} />
-                <p className="app-download-hint" style={{ marginTop: "0.5rem", fontWeight: 500 }}>
-                  Scan to download on your device
-                </p>
-              </div>
-              <p className="app-download-hint" style={{ marginTop: "1rem" }}>
+              <p className="app-download-hint">
                 Tap the app icon or use the button above to download the latest
                 release from GitHub.
+              </p>
+            </div>
+
+            {/* QR Code Container as a flex sibling */}
+            <div className="app-download-qr-container" style={{ display: "flex", flexDirection: "column", alignItems: "center", minWidth: "160px", marginLeft: "auto", marginRight: "2rem" }}>
+              <div style={{ background: "white", padding: "12px", borderRadius: "12px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", display: "flex" }}>
+                <QRCodeSVG value={apk.downloadUrl} size={140} />
+              </div>
+              <p className="app-download-hint" style={{ marginTop: "0.75rem", fontWeight: 500, textAlign: "center", margin: "0.75rem 0 0 0" }}>
+                Scan to download<br/>on your device
               </p>
             </div>
           </div>

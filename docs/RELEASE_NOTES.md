@@ -6,6 +6,15 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 ---
 
+<!-- RELEASE_START version=3.1.3 -->
+## Version 3.1.3
+
+**Portal**
+
+- **UI Updates**: Restructured the App Download page layout to neatly align the QR code to the side, improving readability and aesthetic balance.
+
+<!-- RELEASE_END version=3.1.3 -->
+
 <!-- RELEASE_START version=3.1.2 -->
 ## Version 3.1.2
 
