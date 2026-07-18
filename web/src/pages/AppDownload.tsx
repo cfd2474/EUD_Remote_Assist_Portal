@@ -3,6 +3,7 @@ import { useAuth } from "react-oidc-context";
 import ReactMarkdown from "react-markdown";
 import { fetchLatestApk } from "../api/client";
 import type { LatestApkRelease } from "../types";
+import { QRCodeSVG } from "qrcode.react";
 
 export function AppDownload() {
   const auth = useAuth();
@@ -84,7 +85,13 @@ export function AppDownload() {
               >
                 Download .apk
               </a>
-              <p className="app-download-hint">
+              <div style={{ marginTop: "1.5rem", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <QRCodeSVG value={apk.downloadUrl} size={160} />
+                <p className="app-download-hint" style={{ marginTop: "0.5rem", fontWeight: 500 }}>
+                  Scan to download on your device
+                </p>
+              </div>
+              <p className="app-download-hint" style={{ marginTop: "1rem" }}>
                 Tap the app icon or use the button above to download the latest
                 release from GitHub.
               </p>
