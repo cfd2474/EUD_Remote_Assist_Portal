@@ -6,6 +6,15 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 ---
 
+<!-- RELEASE_START version=3.1.2 -->
+## Version 3.1.2
+
+**Portal**
+
+- **Download Page**: Added a QR code to the App Download page to allow easy scanning and downloading of the APK directly to mobile devices.
+
+<!-- RELEASE_END version=3.1.2 -->
+
 <!-- RELEASE_START version=3.1.1 -->
 ## Version 3.1.1
 
