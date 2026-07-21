@@ -6,6 +6,15 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 ---
 
+<!-- RELEASE_START version=3.1.4 -->
+## Version 3.1.4
+
+**App**
+
+- **MDM Override**: Added the ability to instantly bypass the MDM configuration during "Scan to Enroll" if the correct MDM settings password is provided.
+
+<!-- RELEASE_END version=3.1.4 -->
+
 <!-- RELEASE_START version=3.1.3 -->
 ## Version 3.1.3
 
