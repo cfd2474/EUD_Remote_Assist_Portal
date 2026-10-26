@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env
+.env.local
+data/portal-settings.json
+*.log
+.DS_Store
+nginx/certs/*.pem
+!nginx/certs/.gitkeep
+docs/dev-server-credentials.md
+docker-compose.override.yml
+*.apk
+
+# Reports
+azure_nsg_configuration_report.md
