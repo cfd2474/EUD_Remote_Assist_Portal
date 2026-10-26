@@ -6,6 +6,23 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 ---
 
+<!-- RELEASE_START version=3.3.0 -->
+## v3.3.0 — 2026-10-26
+
+**Portal**, with **app 3.3.0** included.
+
+- **The console hosts the EUD Remote Assist app itself.** Each portal release now ships with the matching app. The Download page, its QR code and the "Newer application version available" badge all use the copy on your console. Neither the server nor your devices contact GitHub for the app, and the GitHub token setting is gone.
+- **Devices are told when the console has a newer app.** App 3.3.0 shows **Update available** with a **Download update** button that downloads from your console, and Android then asks to install it. Devices managed by MDM can keep updating through MDM.
+- **Portal Configuration → App build** shows the hosted app version and its checksums.
+- The console checks the app before offering it. It accepts only the EUD Remote Assist app signed with the release certificate, and never offers an older version than it already has.
+
+**Upgrading from 3.2.x:**
+- No configuration changes are needed.
+- `GITHUB_APK_REPO` and `GITHUB_TOKEN` are no longer used and can stay in `.env`.
+- A GitHub token saved in Portal Configuration is deleted automatically.
+- The update download is larger (about 76 MB), because it now includes the app.
+<!-- RELEASE_END version=3.3.0 -->
+
 <!-- RELEASE_START version=3.2.5 -->
 ## v3.2.5 — 2026-10-25
 

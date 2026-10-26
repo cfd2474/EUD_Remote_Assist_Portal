@@ -48,10 +48,8 @@ Required values:
 | `OIDC_AUDIENCE` | `eud-remote-assist` (optional) |
 | `NGINX_BIND_ADDR` | `127.0.0.1` when using host nginx (recommended) |
 | `HTTP_PORT` | `8091` when host nginx proxies to loopback (see host nginx examples) |
-| `GITHUB_APK_REPO` | `owner/repo` with `.apk` GitHub Releases |
-| `GITHUB_TOKEN` | Optional in `.env`; or use **Portal Configuration** in the admin UI |
 
-See [github-apk-config.md](github-apk-config.md) for GitHub token setup (default: no token; optional classic `public_repo` token).  
+The app APK ships in `dist/` and the console hosts it: see [app-hosting.md](app-hosting.md).  
 See [authentik-setup.md](authentik-setup.md) for OIDC configuration.  
 For **infra-TAK** co-deploy (Caddy, port 8767): [infratak-integration.md](infratak-integration.md).
 

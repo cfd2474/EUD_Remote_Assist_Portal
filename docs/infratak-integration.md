@@ -65,16 +65,17 @@ PHONEDB_TLS_INSECURE=false
 GITHUB_APK_REPO=cfd2474/EUD_Remote_Assist_Portal
 ```
 
+`GITHUB_APK_REPO` is no longer read (3.3.0+). infra-TAK may keep writing it, and it's harmless.
+
 `NGINX_ENABLE_TLS` is not read by this stack (the inner nginx is always HTTP). infra-TAK writes it, and it's harmless.
 
 | Variable | infra-TAK | Notes |
 |----------|-----------|-------|
-| `GITHUB_APK_REPO` | Operator / default | Repo that publishes `.apk` releases |
-| `GITHUB_TOKEN` | Optional | Or configure later via **Portal Configuration** in the admin UI |
+| `GITHUB_APK_REPO`, `GITHUB_TOKEN` | Ignored since 3.3.0 | The console hosts the app APK from `dist/` ([app-hosting.md](app-hosting.md)) |
 
 **New required env vars:** always add to `.env.example` with a default so infra-TAK can merge on deploy.
 
-See [github-apk-config.md](github-apk-config.md) for GitHub APK lookup details.
+The app APK is served by the console at `/api/v1/app/apk` on the device port; no Caddy change is needed. See [app-hosting.md](app-hosting.md).
 
 ---
 

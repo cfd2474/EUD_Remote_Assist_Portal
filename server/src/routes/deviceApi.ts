@@ -17,6 +17,7 @@ import {
 import { drainPendingToDevice } from "../services/signalingSession.js";
 import { hub } from "../ws/hub.js";
 import { config } from "../config.js";
+import { appUpdateOffer, getCurrentAppBuild } from "../services/appBuilds.js";
 import type { DeviceRegistration, TelemetryPayload, DeviceEventPayload } from "../types.js";
 
 function firstString(...values: unknown[]): string | undefined {
@@ -188,6 +189,11 @@ deviceApiRouter.get("/commands", requireDeviceSecret, async (req, res) => {
     const response: Record<string, unknown> = { commands };
     if (commands.some((c) => c.command === "START_REMOTE_ADMIN")) {
       response.signaling_hint = SIGNALING_HINT_PAYLOAD;
+    }
+    // app_update: the console's app build, when the device reports an older version.
+    const appUpdate = appUpdateOffer(getCurrentAppBuild(), req.device!.app_version);
+    if (appUpdate) {
+      response.app_update = appUpdate;
     }
     res.json(response);
   } catch (err) {

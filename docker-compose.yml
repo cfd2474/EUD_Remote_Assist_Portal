@@ -45,11 +45,11 @@ services:
       MAP_TILE_ATTRIBUTION: ${MAP_TILE_ATTRIBUTION:-}
       GEOCODER_URL: ${GEOCODER_URL:-}
       GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-}
-      GITHUB_APK_REPO: ${GITHUB_APK_REPO:-cfd2474/EUD_Remote_Assist_Portal}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       PORTAL_SETTINGS_DIR: /app/data
     volumes:
       - ./data:/app/data
+      # The app APK that ships with this release; imported into ./data/apk at startup.
+      - ./dist:/seed:ro
     expose:
       - "3000"
 

@@ -1,5 +1,5 @@
 import type { User } from "oidc-client-ts";
-import type { ClientConfig, ControlPacket, Device, DeviceCommand, LatestApkRelease, LocationHistoryPoint, PortalGithubConfig, SignalingStatus } from "../types";
+import type { ClientConfig, ControlPacket, Device, DeviceCommand, LatestApkRelease, LocationHistoryPoint, PortalConfig, SignalingStatus } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -150,32 +150,8 @@ export async function fetchLatestApk(user: User): Promise<LatestApkRelease> {
 
 export async function fetchPortalConfig(
   user: User
-): Promise<PortalGithubConfig> {
-  return apiFetch<PortalGithubConfig>("/api/admin/portal-config", user);
-}
-
-export async function applyPortalGithubToken(
-  user: User,
-  token: string
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
-    "/api/admin/portal-config/github",
-    user,
-    {
-      method: "PUT",
-      body: JSON.stringify({ token }),
-    }
-  );
-}
-
-export async function clearPortalGithubToken(
-  user: User
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
-    "/api/admin/portal-config/github",
-    user,
-    { method: "DELETE" }
-  );
+): Promise<PortalConfig> {
+  return apiFetch<PortalConfig>("/api/admin/portal-config", user);
 }
 
 export async function applyPortalTurnSettings(
@@ -183,8 +159,8 @@ export async function applyPortalTurnSettings(
   turnServerUrl: string,
   turnUsername?: string,
   turnCredential?: string
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
+): Promise<PortalConfig & { ok: true }> {
+  return apiFetch<PortalConfig & { ok: true }>(
     "/api/admin/portal-config/turn",
     user,
     {
@@ -196,8 +172,8 @@ export async function applyPortalTurnSettings(
 
 export async function clearPortalTurnSettings(
   user: User
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
+): Promise<PortalConfig & { ok: true }> {
+  return apiFetch<PortalConfig & { ok: true }>(
     "/api/admin/portal-config/turn",
     user,
     { method: "DELETE" }

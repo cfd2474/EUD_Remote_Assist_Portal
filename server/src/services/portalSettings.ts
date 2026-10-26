@@ -13,6 +13,7 @@ const SETTINGS_PATH =
   path.join(SETTINGS_DIR, "portal-settings.json");
 
 type PortalSettingsFile = {
+  /** Retired in 3.3.0 (the console hosts the APK); dropped from the file on load. */
   githubToken?: string;
   serverPort?: number;
   turnServerUrl?: string;
@@ -20,30 +21,14 @@ type PortalSettingsFile = {
   turnCredential?: string;
 };
 
-let portalGithubToken: string | undefined;
 let portalServerPort: number | undefined;
 let portalTurnServerUrl: string | undefined;
 let portalTurnUsername: string | undefined;
 let portalTurnCredential: string | undefined;
 
-function envGithubToken(): string | undefined {
-  return config.github.token;
-}
-
-export function getGithubApkRepo(): string {
-  return config.github.repo;
-}
-
-export function getEffectiveGithubToken(): string | undefined {
-  return envGithubToken() ?? portalGithubToken;
-}
-
 export type SettingSource = "environment" | "portal" | null;
 
 export type PortalConfigStatus = {
-  apkRepo: string;
-  tokenConfigured: boolean;
-  tokenSource: SettingSource;
   /** Device API base URL from PUBLIC_BASE_URL; the enrollment QR uses it. */
   publicBaseUrl: string;
   /** Port in publicBaseUrl (default for the scheme when omitted), or null if unset/invalid. */
@@ -72,7 +57,7 @@ function envTurn(): TurnServer | undefined {
   return url ? { url, username, credential } : undefined;
 }
 
-/** TURN from .env wins over Portal Configuration (same rule as the GitHub token). */
+/** TURN from .env wins over Portal Configuration. */
 export function getEffectiveTurn(): { turn?: TurnServer; source: SettingSource } {
   const fromEnv = envTurn();
   if (fromEnv) return { turn: fromEnv, source: "environment" };
@@ -100,12 +85,8 @@ export function getPortalConfigStatus(): PortalConfigStatus {
   const devicePort = portOf(config.publicBaseUrl);
   const legacyServerPort = portalServerPort ?? null;
   const { turn, source: turnSource } = getEffectiveTurn();
-  const tokenSource: SettingSource = envGithubToken() ? "environment" : portalGithubToken ? "portal" : null;
 
   return {
-    apkRepo: getGithubApkRepo(),
-    tokenConfigured: tokenSource !== null,
-    tokenSource,
     publicBaseUrl: config.publicBaseUrl,
     devicePort,
     legacyServerPort,
@@ -120,11 +101,15 @@ export async function loadPortalSettings(): Promise<void> {
   try {
     const raw = await readFile(SETTINGS_PATH, "utf-8");
     const parsed = JSON.parse(raw) as PortalSettingsFile;
-    portalGithubToken = parsed.githubToken?.trim() || undefined;
     portalServerPort = parsed.serverPort;
     portalTurnServerUrl = parsed.turnServerUrl?.trim() || undefined;
     portalTurnUsername = parsed.turnUsername?.trim() || undefined;
     portalTurnCredential = parsed.turnCredential || undefined;
+    if (parsed.githubToken) {
+      // Don't leave a credential on disk that nothing uses any more.
+      await persistPortalSettings();
+      console.log("Removed the retired GitHub token from portal settings (the console now hosts the APK).");
+    }
 
     // L-5: Enforce 0600 permissions on startup in case it was created manually
     try {
@@ -137,7 +122,6 @@ export async function loadPortalSettings(): Promise<void> {
     if (code !== "ENOENT") {
       console.error("Failed to load portal settings:", err);
     }
-    portalGithubToken = undefined;
     portalServerPort = undefined;
     portalTurnServerUrl = undefined;
     portalTurnUsername = undefined;
@@ -149,9 +133,6 @@ async function persistPortalSettings(): Promise<void> {
   await mkdir(SETTINGS_DIR, { recursive: true });
 
   const payload: PortalSettingsFile = {};
-  if (portalGithubToken) {
-    payload.githubToken = portalGithubToken;
-  }
   if (portalServerPort !== undefined) {
     payload.serverPort = portalServerPort;
   }
@@ -174,70 +155,6 @@ async function persistPortalSettings(): Promise<void> {
     await chmod(SETTINGS_PATH, 0o600);
   } catch {
     // Best effort on platforms that restrict chmod.
-  }
-}
-
-export async function setPortalGithubToken(token: string): Promise<void> {
-  if (envGithubToken()) {
-    throw new Error(
-      "GitHub token is configured in server environment (.env). Remove GITHUB_TOKEN from .env to manage it in the portal."
-    );
-  }
-
-  const trimmed = token.trim();
-  if (!trimmed) {
-    throw new Error("GitHub token is required.");
-  }
-
-  if (!/^gh[pousr]_/.test(trimmed) && !/^github_pat_/.test(trimmed)) {
-    throw new Error(
-      "Token format is not recognized. Use a GitHub classic personal access token (ghp_...)."
-    );
-  }
-
-  portalGithubToken = trimmed;
-  await persistPortalSettings();
-}
-
-export async function clearPortalGithubToken(): Promise<void> {
-  if (envGithubToken()) {
-    throw new Error(
-      "GitHub token is configured in server environment (.env). Remove GITHUB_TOKEN from .env to clear it here."
-    );
-  }
-
-  portalGithubToken = undefined;
-  await persistPortalSettings();
-}
-
-export async function validateGithubToken(
-  token: string,
-  repo: string
-): Promise<void> {
-  const res = await fetch(
-    `https://api.github.com/repos/${repo}/releases?per_page=1`,
-    {
-      headers: {
-        Accept: "application/vnd.github+json",
-        Authorization: `Bearer ${token}`,
-        "User-Agent": "eud-remote-assist-portal",
-      },
-      cache: "no-store",
-    }
-  );
-
-  if (res.status === 401) {
-    throw new Error("GitHub rejected this token. Check that it is valid and not expired.");
-  }
-
-  if (res.status === 403) {
-    throw new Error(
-      "GitHub denied access. For a public APK repo, use a classic token with the public_repo scope."
-    );
-  }
-
-  if (!res.ok) {
-    throw new Error(`GitHub API returned ${res.status} while validating the token.`);
   }
 }
 

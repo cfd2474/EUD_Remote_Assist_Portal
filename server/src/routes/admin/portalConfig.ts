@@ -1,11 +1,12 @@
 import { Router } from "express";
-import { getLatestApkRelease } from "../../services/githubReleases.js";
 import {
-  clearPortalGithubToken,
+  appDownloadFilename,
+  appDownloadUrl,
+  getCurrentAppBuild,
+} from "../../services/appBuilds.js";
+import { readAppReleaseNotes } from "../../services/appReleaseNotes.js";
+import {
   getPortalConfigStatus,
-  setPortalGithubToken,
-  validateGithubToken,
-  getGithubApkRepo,
   setTurnSettings,
   clearTurnSettings,
   getIceServers,
@@ -13,23 +14,32 @@ import {
 } from "../../services/portalSettings.js";
 import { config } from "../../config.js";
 
-/** Site settings (Portal Configuration), runtime client settings, and the latest APK. */
+/** Site settings (Portal Configuration), runtime client settings, and the hosted APK. */
 export const portalConfigRouter = Router();
 
+/** The app build this console hosts (imported from dist/ at startup). */
 portalConfigRouter.get("/app/latest-apk", async (_req, res) => {
-  try {
-    const latest = await getLatestApkRelease();
-    if (!latest) {
-      res.status(404).json({ error: "No APK release found on GitHub" });
-      return;
-    }
-    res.json({ apk: latest });
-  } catch (err) {
-    console.error("Latest APK lookup error:", err);
-    const message =
-      err instanceof Error ? err.message : "Failed to fetch latest APK from GitHub";
-    res.status(502).json({ error: message });
+  const build = getCurrentAppBuild();
+  if (!build) {
+    res.status(404).json({
+      error: "This console has no app build. The APK ships in dist/ with each portal release.",
+    });
+    return;
   }
+  res.json({
+    apk: {
+      version: build.versionName,
+      versionCode: build.versionCode,
+      filename: appDownloadFilename(build),
+      downloadUrl: appDownloadUrl(),
+      releaseTag: `v${build.versionName}`,
+      releaseNotes: await readAppReleaseNotes(build.versionName),
+      sha256: build.sha256,
+      signerSha256: build.signerSha256,
+      size: build.size,
+      importedAt: build.createdAt,
+    },
+  });
 });
 
 portalConfigRouter.get("/portal-config", (_req, res) => {
@@ -48,36 +58,9 @@ portalConfigRouter.get("/client-config", (_req, res) => {
   });
 });
 
-portalConfigRouter.put("/portal-config/github", async (req, res) => {
-  const token = req.body?.token;
-  if (typeof token !== "string") {
-    res.status(400).json({ error: "token is required" });
-    return;
-  }
-
-  try {
-    const trimmed = token.trim();
-    await validateGithubToken(trimmed, getGithubApkRepo());
-    await setPortalGithubToken(trimmed);
-    res.json({ ok: true, ...getPortalConfigStatus() });
-  } catch (err) {
-    console.error("Apply GitHub token error:", err);
-    res.status(400).json({
-      error: err instanceof Error ? err.message : "Failed to apply GitHub token",
-    });
-  }
-});
-
-portalConfigRouter.delete("/portal-config/github", async (_req, res) => {
-  try {
-    await clearPortalGithubToken();
-    res.json({ ok: true, ...getPortalConfigStatus() });
-  } catch (err) {
-    console.error("Clear GitHub token error:", err);
-    res.status(400).json({
-      error: err instanceof Error ? err.message : "Failed to clear GitHub token",
-    });
-  }
+/** Retired in 3.3.0: the console hosts the APK, so it needs no GitHub token. */
+portalConfigRouter.all("/portal-config/github", (_req, res) => {
+  res.status(410).json({ error: "The GitHub token setting was retired in 3.3.0: the console hosts the app APK itself." });
 });
 
 /** Retired in 3.2.0: the device API port now comes from PUBLIC_BASE_URL. */

@@ -30,7 +30,7 @@ export function AppDownload() {
         if (!cancelled) {
           setApk(null);
           setError(
-            err instanceof Error ? err.message : "Failed to load latest APK"
+            err instanceof Error ? err.message : "Failed to load the app build"
           );
         }
       } finally {
@@ -54,7 +54,7 @@ export function AppDownload() {
         <p>Android application for managed device enrollment and remote assist.</p>
       </div>
 
-      {loading && <p className="loading">Checking GitHub for the latest release…</p>}
+      {loading && <p className="loading">Loading the app build…</p>}
       {error && <p className="error">{error}</p>}
 
       {!loading && !error && apk && (
@@ -77,6 +77,9 @@ export function AppDownload() {
                 Current version: <strong>{apk.version}</strong>
               </p>
               <p className="app-download-filename">{apk.filename}</p>
+              <p className="app-download-hint" title={apk.sha256}>
+                SHA-256 {apk.sha256.slice(0, 12)}…{apk.sha256.slice(-6)}
+              </p>
               <a
                 href={apk.downloadUrl}
                 className="app-download-button"
@@ -86,8 +89,8 @@ export function AppDownload() {
                 Download .apk
               </a>
               <p className="app-download-hint">
-                Tap the app icon or use the button above to download the latest
-                release from GitHub.
+                Tap the app icon or use the button above to download the app this
+                console hosts.
               </p>
             </div>
 

@@ -9,6 +9,10 @@ Notes for app versions before 3.1.4 are in those releases, and in the portal not
 
 ---
 
+## v3.3.0 — 2026-10-26
+
+- **The app tells you when your console has a newer version.** When the EUD Remote Assist console (portal 3.3.0 or later) hosts a newer build, the app shows **Update available** with a **Download update** button. The download comes from your own console, not the internet. Android then asks you to install it. Devices managed by MDM can keep updating through MDM as before.
+
 ## v3.2.1 — 2026-10-25
 
 - **The device registers as soon as its setup is complete.** If the app was opened before every permission was granted (for example, Remote Control was turned on afterwards in Settings), it used to stay "Not Registered" until someone tapped Refresh Connection. It now registers by itself when you return to the app with everything granted.

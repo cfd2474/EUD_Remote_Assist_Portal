@@ -76,20 +76,24 @@ export interface LocationHistoryPoint {
   recorded_at: string;
 }
 
+/** The app build this console hosts (imported from dist/ with each portal release). */
 export interface LatestApkRelease {
   version: string;
+  versionCode: number;
   filename: string;
+  /** Device-reachable download (PUBLIC_BASE_URL/api/v1/app/apk). */
   downloadUrl: string;
   releaseTag: string;
   releaseNotes: string;
+  sha256: string;
+  signerSha256: string;
+  size: number;
+  importedAt: string;
 }
 
 export type SettingSource = "environment" | "portal" | null;
 
-export interface PortalGithubConfig {
-  apkRepo: string;
-  tokenConfigured: boolean;
-  tokenSource: SettingSource;
+export interface PortalConfig {
   /** Device API base URL (PUBLIC_BASE_URL); the enrollment QR uses it. */
   publicBaseUrl: string;
   devicePort: number | null;

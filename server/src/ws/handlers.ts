@@ -5,6 +5,7 @@ import type { DeviceRow } from "../types.js";
 import { hub } from "./hub.js";
 import { verifyAdminToken } from "../auth/oidc.js";
 import { deliverQueuedCommands } from "../services/commandDispatch.js";
+import { appUpdateOffer, getCurrentAppBuild } from "../services/appBuilds.js";
 import bcrypt from "bcrypt";
 import {
   isSignalingMessage,
@@ -121,7 +122,9 @@ export function attachWebSocketHandlers(
             authenticated = true;
             clearTimeout(authTimeout);
             hub.registerDevice(ws, auth.uid, auth.connection_secret);
-            ws.send(JSON.stringify({ type: "auth_ok", uid: auth.uid }));
+            // app_update: the console's app build, when the device reports an older version.
+            const appUpdate = appUpdateOffer(getCurrentAppBuild(), device.app_version);
+            ws.send(JSON.stringify({ type: "auth_ok", uid: auth.uid, ...(appUpdate ? { app_update: appUpdate } : {}) }));
 
             const pending = await deliverQueuedCommands(auth.uid, (command) =>
               ws.send(JSON.stringify(command))

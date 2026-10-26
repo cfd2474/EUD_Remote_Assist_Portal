@@ -72,6 +72,19 @@ CREATE TABLE IF NOT EXISTS enrollment_tokens (
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'qr';
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS max_uses INTEGER;
 ALTER TABLE enrollment_tokens ADD COLUMN IF NOT EXISTS uses INTEGER NOT NULL DEFAULT 0;
+
+-- App APKs the console hosts (imported from dist/ at startup). The current build is the
+-- highest version_code; imports never add a lower one, so it never moves backwards.
+CREATE TABLE IF NOT EXISTS app_builds (
+  sha256 TEXT PRIMARY KEY,
+  package_name TEXT NOT NULL,
+  version_code INTEGER NOT NULL UNIQUE,
+  version_name TEXT NOT NULL,
+  signer_sha256 TEXT NOT NULL,
+  size BIGINT NOT NULL,
+  source_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 `;
 
 /** Idempotent: every statement is IF [NOT] EXISTS, so this runs safely on every start. */

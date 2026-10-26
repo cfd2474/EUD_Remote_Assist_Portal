@@ -1,6 +1,6 @@
 # EUD Remote Assist Portal
 
-**Release:** 3.2.5 (see [`VERSION`](VERSION) and [docs/versioning.md](docs/versioning.md))
+**Release:** 3.3.0 (see [`VERSION`](VERSION) and [docs/versioning.md](docs/versioning.md))
 
 Server-based web platform for remotely managing company-owned Android devices. Supports device registration, location tracking, ping requests, WebSocket command delivery, and WebRTC screen viewing with remote touch control. Includes **Constrained Network Detection** for bandwidth-limited links such as satellite, and a configurable **TURN server** for WebRTC relay that both the admin browser and the device use. External services (STUN, map tiles, address lookup, PhoneDB model names) are configurable or can be turned off for closed networks. See the *External services* block in [`.env.example`](.env.example).
 
@@ -123,7 +123,7 @@ See:
 - [docs/manual-install.md](docs/manual-install.md) — server setup on Ubuntu 22.04
 - [docs/authentik-setup.md](docs/authentik-setup.md) — OIDC provider setup
 - [docs/mdm-config.md](docs/mdm-config.md) — Android MDM managed config
-- [docs/github-apk-config.md](docs/github-apk-config.md) — GitHub token per server (APK download / version checks)
+- [docs/app-hosting.md](docs/app-hosting.md) — the console hosts the app APK (no GitHub at runtime)
 
 ## Local development
 

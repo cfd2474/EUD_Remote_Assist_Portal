@@ -1,3 +1,5 @@
+import path from "node:path";
+
 function requireEnv(name: string, fallback?: string): string {
   const value = process.env[name] ?? fallback;
   if (!value) {
@@ -41,9 +43,12 @@ export const config = {
   publicBaseUrl: (process.env.PUBLIC_BASE_URL ?? "").trim(),
   corsOrigin: process.env.CORS_ORIGIN ?? "http://localhost:5173",
   commandSecretHeader: "x-connection-secret",
-  github: {
-    repo: process.env.GITHUB_APK_REPO ?? "cfd2474/EUD_Remote_Assist_Portal",
-    token: process.env.GITHUB_TOKEN || undefined,
+  appBuilds: {
+    /** Read-only folder with the release APK and SIGNER.sha256; compose mounts ./dist here. */
+    seedDir: process.env.APP_SEED_DIR?.trim() || "/seed",
+    /** Imported APKs, one file per SHA-256, under the persistent settings folder. */
+    storeDir: path.join(process.env.PORTAL_SETTINGS_DIR ?? path.join(process.cwd(), "data"), "apk"),
+    packageName: "com.cfd2474.eudremoteassist",
   },
   phonedb: {
     /** PHONEDB_ENABLED=false skips phonedb.net and shows only built-in model names. */

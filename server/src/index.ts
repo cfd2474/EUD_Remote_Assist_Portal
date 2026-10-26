@@ -8,6 +8,7 @@ import { config } from "./config.js";
 import { SERVICE_NAME, VERSION } from "./version.js";
 import { deviceApiRouter } from "./routes/deviceApi.js";
 import { adminApiRouter } from "./routes/adminApi.js";
+import { appDownloadRouter } from "./routes/appDownload.js";
 import { attachWebSocketHandlers } from "./ws/handlers.js";
 import { resetLiveSessionFlags, purgeOldLocationHistory } from "./services/devices.js";
 import { purgeExpiredCommands } from "./services/commands.js";
@@ -15,10 +16,8 @@ import { getSignalingStatus, pruneIdleSessions } from "./services/signalingSessi
 import { startViewerPresencePolicy } from "./services/viewerPresence.js";
 import { dispatchCommand } from "./services/commandDispatch.js";
 import { hub } from "./ws/hub.js";
-import {
-  getEffectiveGithubToken,
-  loadPortalSettings,
-} from "./services/portalSettings.js";
+import { loadPortalSettings } from "./services/portalSettings.js";
+import { seedAppBuilds } from "./services/appBuildSeeder.js";
 
 const app = express();
 
@@ -68,6 +67,7 @@ app.get("/version", (_req, res) => {
   res.json({ version: VERSION, service: SERVICE_NAME });
 });
 
+app.use("/api/v1", deviceLimiter, appDownloadRouter);
 app.use("/api/v1", deviceLimiter, deviceApiRouter);
 app.use("/api/admin", adminApiRouter);
 
@@ -142,6 +142,8 @@ function runSignalingPrune(): void {
 
 void resetLiveSessionFlags().then(async () => {
   await loadPortalSettings();
+  // Import the APK that ships with this release (dist/). A failure must not keep the portal down.
+  await seedAppBuilds().catch((err) => console.error("App build import failed:", err));
   await runDailyMaintenance();
   setInterval(runDailyMaintenance, DAILY_MAINTENANCE_MS);
   setInterval(runSignalingPrune, SIGNALING_PRUNE_MS);
@@ -150,10 +152,5 @@ void resetLiveSessionFlags().then(async () => {
     console.log(
       `EUD Remote Assist Portal v${VERSION} listening on port ${config.port}`
     );
-    if (!getEffectiveGithubToken()) {
-      console.warn(
-        "No GitHub token configured — APK lookups use standard unauthenticated GitHub API access. Add a token under Portal Configuration for unthrottled repo access."
-      );
-    }
   });
 });
