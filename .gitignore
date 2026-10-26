@@ -1,0 +1,35 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env
+.env.local
+data/portal-settings.json
+*.log
+.DS_Store
+nginx/certs/*.pem
+!nginx/certs/.gitkeep
+docs/dev-server-credentials.md
+docker-compose.override.yml
+*.apk
+
+# Reports
+azure_nsg_configuration_report.md
+
+# Host access notes (contain live credentials)
+REMOTE_SERVER.md
+docs/REMOTE_SERVER.md
+
+# Local working files (process notes, may name hosts) — public repo
+CLAUDE.md
+PROJECT_STATE.md
+docs/CLEANUP_ASSESSMENT.md
+
+# Emulator e2e: generated env and run artifacts
+e2e/.env.e2e
+e2e/artifacts/
+
+# Android signing credentials and keystores (never commit)
+keystore.properties
+*.jks
+*.keystore
