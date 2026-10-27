@@ -168,7 +168,7 @@ export async function lookupPhoneDbModel(
   if (!promise) {
     promise = (async () => {
       try {
-        const fromPhoneDb = await fetchFromPhoneDb(model);
+        const fromPhoneDb = config.phonedb.enabled ? await fetchFromPhoneDb(model) : null;
         if (fromPhoneDb) {
           setCache(model, fromPhoneDb);
           return fromPhoneDb;

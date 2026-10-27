@@ -1,14 +1,17 @@
 import { useState, useEffect } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useAuth } from "react-oidc-context";
-import { fetchEnrollmentTokens, createEnrollmentToken, revokeEnrollmentToken, deleteEnrollmentToken, fetchPortalConfig, type EnrollmentToken } from "../api/client";
+import { fetchEnrollmentTokens, createEnrollmentToken, revokeEnrollmentToken, deleteEnrollmentToken, type EnrollmentToken } from "../api/client";
+import { useClientConfig } from "../config/clientConfig";
 
 export function Enrollment() {
   const auth = useAuth();
   const [tokens, setTokens] = useState<EnrollmentToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [serverPort, setServerPort] = useState<number>(8448);
+  const { config: clientConfig, error: clientConfigError } = useClientConfig();
+  // Device API URL from the server's PUBLIC_BASE_URL — the same value /api/v1/register returns.
+  const trackingUrl = clientConfig?.publicBaseUrl.replace(/\/+$/, "") ?? "";
 
   const [agency, setAgency] = useState("");
   const [description, setDescription] = useState("");
@@ -30,14 +33,6 @@ export function Enrollment() {
       setLoading(true);
       const data = await fetchEnrollmentTokens(auth.user);
       setTokens(data);
-      try {
-        const config = await fetchPortalConfig(auth.user);
-        if (config && config.serverPort) {
-          setServerPort(config.serverPort);
-        }
-      } catch (e) {
-        console.warn("Failed to fetch portal config for server port:", e);
-      }
     } catch (err: any) {
       setError(err.message || "Failed to load tokens");
     } finally {
@@ -99,7 +94,22 @@ export function Enrollment() {
 
 
   function renderQrCode(t: EnrollmentToken) {
-    const trackingUrl = `${window.location.protocol}//${window.location.hostname}:${serverPort}`;
+    if (!trackingUrl) {
+      return (
+        <div className="card" style={{ marginTop: "1rem" }}>
+          <button onClick={() => setSelectedToken(null)} style={{ float: "right", cursor: "pointer" }}>
+            Dismiss
+          </button>
+          <p className="error">
+            {clientConfigError
+              ? `Could not load the device API URL: ${clientConfigError}`
+              : clientConfig
+                ? "PUBLIC_BASE_URL is not set on the server, so there is no device API URL to put in the QR code. Set it in .env and restart the stack."
+                : "Loading the device API URL…"}
+          </p>
+        </div>
+      );
+    }
     const payload = JSON.stringify({
       enrollment_token: t.token,
       tls_pin_hash: t.tls_pin_hash || undefined,

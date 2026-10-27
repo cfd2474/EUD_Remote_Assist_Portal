@@ -1,5 +1,5 @@
 import { randomBytes } from "crypto";
-import { pool } from "../db/pool.js";
+import { pool, withTransaction } from "../db/pool.js";
 import type {
   DeviceRegistration,
   DeviceRow,
@@ -13,124 +13,124 @@ import {
 } from "./locationHistory.js";
 
 import bcrypt from "bcrypt";
+import { consumeEnrollmentToken, lockUsableEnrollmentToken } from "./enrollmentTokens.js";
 
 function generateConnectionSecret(): string {
   return randomBytes(32).toString("hex");
 }
 
+/** Proof of Possession: an enrolled uid may only re-register with its current secret. */
+async function assertProofOfPossession(
+  device: DeviceRow,
+  providedSecret?: string
+): Promise<void> {
+  if (!providedSecret) {
+    throw new Error("Missing x-connection-secret header for existing device re-registration. Wiped devices must be deleted from the portal before re-enrolling.");
+  }
+
+  const validSecret = await bcrypt.compare(providedSecret, device.connection_secret);
+  if (!validSecret) {
+    throw new Error("Invalid connection secret provided for existing device re-registration.");
+  }
+}
+
+/**
+ * The token is checked first, then Proof of Possession, and only then consumed —
+ * all in one transaction, so a rejected or failed registration never uses it up.
+ */
 export async function registerDevice(
   data: DeviceRegistration,
   providedSecret?: string
 ): Promise<{ device: DeviceRow; connection_secret: string; is_new: boolean }> {
-  if (!data.enrollment_token) {
+  const enrollmentToken = data.enrollment_token;
+  if (!enrollmentToken) {
     throw new Error("Missing enrollment_token");
   }
 
-  const tokenCheck = await pool.query(
-    "SELECT * FROM enrollment_tokens WHERE token = $1 AND is_active = TRUE AND (expires_at IS NULL OR expires_at > NOW()) AND (max_uses IS NULL OR uses < max_uses)",
-    [data.enrollment_token]
-  );
+  return withTransaction(async (client) => {
+    const tokenRecord = await lockUsableEnrollmentToken(client, enrollmentToken);
+    if (!tokenRecord) {
+      throw new Error("Invalid, expired, or fully consumed enrollment token");
+    }
 
-  if (tokenCheck.rows.length === 0) {
-    throw new Error("Invalid, expired, or fully consumed enrollment token");
-  }
+    const agency = data.agency ?? tokenRecord.agency ?? null;
 
-  const tokenRecord = tokenCheck.rows[0];
-
-  await pool.query(
-    "UPDATE enrollment_tokens SET uses = uses + 1, is_active = CASE WHEN max_uses IS NOT NULL AND uses + 1 >= max_uses THEN FALSE ELSE is_active END WHERE token = $1",
-    [data.enrollment_token]
-  );
-  if (tokenRecord.agency && !data.agency) {
-    data.agency = tokenRecord.agency;
-  }
-
-  const existing = await pool.query<DeviceRow>(
-    "SELECT * FROM devices WHERE uid = $1",
-    [data.uid]
-  );
-
-  if (existing.rows.length > 0) {
+    const existing = await client.query<DeviceRow>(
+      "SELECT * FROM devices WHERE uid = $1 FOR UPDATE",
+      [data.uid]
+    );
     const existingDevice = existing.rows[0];
-    
-    // Proof of Possession
-    if (!providedSecret) {
-      throw new Error("Missing x-connection-secret header for existing device re-registration. Wiped devices must be deleted from the portal before re-enrolling.");
+
+    if (existingDevice) {
+      await assertProofOfPossession(existingDevice, providedSecret);
     }
-    
-    const validSecret = await bcrypt.compare(providedSecret, existingDevice.connection_secret);
-    if (!validSecret) {
-      throw new Error("Invalid connection secret provided for existing device re-registration.");
-    }
+
+    await consumeEnrollmentToken(client, enrollmentToken);
 
     const connection_secret = generateConnectionSecret();
     const hashedSecret = await bcrypt.hash(connection_secret, 10);
 
-    await pool.query(
-      `UPDATE devices SET
-        serial = COALESCE($2, serial),
-        imei = COALESCE($3, imei),
-        device_name = $4,
-        model = COALESCE($5, model),
-        agency = COALESCE($6, agency),
-        phone_number = COALESCE($7, phone_number),
-        app_version = COALESCE($8, app_version),
-        public_key = COALESCE($9, public_key),
-        connection_secret = $10,
-        last_seen_at = NOW()
-      WHERE uid = $1`,
+    if (existingDevice) {
+      const updated = await client.query<DeviceRow>(
+        `UPDATE devices SET
+          serial = COALESCE($2, serial),
+          imei = COALESCE($3, imei),
+          device_name = $4,
+          model = COALESCE($5, model),
+          agency = COALESCE($6, agency),
+          phone_number = COALESCE($7, phone_number),
+          app_version = COALESCE($8, app_version),
+          public_key = COALESCE($9, public_key),
+          connection_secret = $10,
+          last_seen_at = NOW()
+        WHERE uid = $1
+        RETURNING *`,
+        [
+          data.uid,
+          data.serial ?? null,
+          data.imei ?? null,
+          data.device_name,
+          data.model ?? null,
+          agency,
+          data.phone_number ?? null,
+          data.app_version ?? null,
+          data.public_key ?? null,
+          hashedSecret,
+        ]
+      );
+      return {
+        device: updated.rows[0],
+        connection_secret,
+        is_new: false,
+      };
+    }
+
+    const inserted = await client.query<DeviceRow>(
+      `INSERT INTO devices (
+        uid, serial, imei, device_name, model, agency, phone_number, app_version,
+        connection_secret, public_key, last_seen_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+      RETURNING *`,
       [
         data.uid,
         data.serial ?? null,
         data.imei ?? null,
         data.device_name,
         data.model ?? null,
-        data.agency ?? null,
+        agency,
         data.phone_number ?? null,
         data.app_version ?? null,
+        hashedSecret,
         data.public_key ?? null,
-        hashedSecret
       ]
     );
-    const updated = await pool.query<DeviceRow>(
-      "SELECT * FROM devices WHERE uid = $1",
-      [data.uid]
-    );
+
     return {
-      device: updated.rows[0],
-      connection_secret: connection_secret,
-      is_new: false,
+      device: inserted.rows[0],
+      connection_secret,
+      is_new: true,
     };
-  }
-
-  const connection_secret = generateConnectionSecret();
-  const hashedSecret = await bcrypt.hash(connection_secret, 10);
-
-  const result = await pool.query<DeviceRow>(
-    `INSERT INTO devices (
-      uid, serial, imei, device_name, model, agency, phone_number, app_version,
-      connection_secret, public_key, last_seen_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
-    RETURNING *`,
-    [
-      data.uid,
-      data.serial ?? null,
-      data.imei ?? null,
-      data.device_name,
-      data.model ?? null,
-      data.agency ?? null,
-      data.phone_number ?? null,
-      data.app_version ?? null,
-      hashedSecret,
-      data.public_key ?? null,
-    ]
-  );
-
-  return {
-    device: result.rows[0],
-    connection_secret,
-    is_new: true,
-  };
+  });
 }
 
 export async function recordTelemetry(data: TelemetryPayload): Promise<void> {
@@ -258,21 +258,22 @@ export async function getTelemetryHistory(
   return result.rows;
 }
 
+/** Points between two instants, newest first. `newestAt` is the API's from_at, `oldestAt` its to_at. */
 export async function getLocationHistory(
   uid: string,
-  fromAt: Date,
-  toAt: Date
+  newestAt: Date,
+  oldestAt: Date
 ): Promise<SampledLocationPoint[]> {
-  const points = await queryLocationHistoryPoints(uid, fromAt, toAt);
+  const points = await queryLocationHistoryPoints(uid, newestAt, oldestAt);
   return downsampleLocationHistory(points);
 }
 
 export async function getLocationHistoryFull(
   uid: string,
-  fromAt: Date,
-  toAt: Date
+  newestAt: Date,
+  oldestAt: Date
 ): Promise<SampledLocationPoint[]> {
-  const points = await queryLocationHistoryPoints(uid, fromAt, toAt);
+  const points = await queryLocationHistoryPoints(uid, newestAt, oldestAt);
 
   return points.map((point, index) => ({
     number: index + 1,
@@ -285,8 +286,8 @@ export async function getLocationHistoryFull(
 
 async function queryLocationHistoryPoints(
   uid: string,
-  fromAt: Date,
-  toAt: Date
+  newestAt: Date,
+  oldestAt: Date
 ): Promise<LocationHistoryPoint[]> {
   const result = await pool.query<{
     lat: number;
@@ -302,7 +303,7 @@ async function queryLocationHistoryPoints(
        AND recorded_at >= $2
        AND recorded_at <= $3
      ORDER BY recorded_at DESC`,
-    [uid, toAt, fromAt]
+    [uid, oldestAt, newestAt]
   );
 
   return result.rows.map((row) => ({

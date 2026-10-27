@@ -3,9 +3,10 @@
 This document outlines the external requirements, policy decisions, and runbook updates necessary to maintain the security posture of the EUD Remote Assist deployment. These items require conscious acknowledgement and management by the infrastructure or administrative teams.
 
 ## 1. Transport Security & Infrastructure (HSTS)
-**Context (O-2):** The portal server itself does not emit `Strict-Transport-Security` (HSTS) headers because it typically sits behind a reverse proxy (e.g., Caddy or Nginx) in production profiles (like infra-TAK) that handles TLS termination.
+**Context (O-2):** The portal server sends `Strict-Transport-Security: max-age=31536000; includeSubDomains` on every response (Helmet, since the 2026-06-20 security fixes). It does not terminate TLS itself; a reverse proxy (Caddy or nginx) does. Browsers ignore HSTS received over plain HTTP, so the header only takes effect when the proxy serves the portal over HTTPS and passes it through.
 **Requirement:** 
-- Ensure that your external reverse proxy or ingress controller explicitly emits the HSTS header on all secure endpoints (typically ports `443` and `8448`).
+- Serve the portal only over HTTPS, on all public endpoints (typically ports `443` and `8448`).
+- Make sure your proxy passes the header through, or sets its own. infra-TAK's Caddy sets it.
 - Example Caddy configuration block: `header Strict-Transport-Security "max-age=31536000;"`
 
 ## 2. Unattended Screen Capture Policy

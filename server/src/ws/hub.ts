@@ -1,11 +1,9 @@
 import { WebSocket } from "ws";
-import type { DeviceCommand, ControlPacket } from "../types.js";
+import type { ControlPacket } from "../types.js";
 import {
   setDeviceOnline,
   setRemoteAdminActive,
 } from "../services/devices.js";
-import { formatCommandForDevice } from "../services/commands.js";
-import type { CommandDeliveryOptions } from "../services/commands.js";
 import {
   normalizeSignaling,
   toWebRtcPayload,
@@ -16,12 +14,14 @@ import {
   recordAdminToDevice,
   recordDeviceToAdmin,
   recordHintSent,
-  setRemoteSessionActive,
   getSignalingStatus,
   getSignalingReplay,
 } from "../services/signalingSession.js";
 
 type ClientRole = "device" | "admin";
+
+/** Called whenever the number of admin viewers watching a device changes. */
+export type ViewerCountListener = (uid: string, viewers: number) => void;
 
 interface ConnectedClient {
   ws: WebSocket;
@@ -36,6 +36,7 @@ export class ConnectionHub {
   private admins = new Map<string, Set<WebSocket>>();
   private clients = new WeakMap<WebSocket, ConnectedClient>();
   private offlineTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private viewerListeners: ViewerCountListener[] = [];
 
   private static readonly OFFLINE_GRACE_MS = 8_000;
 
@@ -70,6 +71,7 @@ export class ConnectionHub {
         this.admins.set(watchUid, new Set());
       }
       this.admins.get(watchUid)!.add(ws);
+      this.notifyViewerCount(watchUid);
 
       const online = this.isDeviceOnline(watchUid);
       ws.send(JSON.stringify({ type: "device_status", uid: watchUid, online }));
@@ -123,38 +125,25 @@ export class ConnectionHub {
 
     if (client.role === "admin" && client.uid) {
       const set = this.admins.get(client.uid);
-      set?.delete(ws);
+      const removed = set?.delete(ws) ?? false;
       if (set?.size === 0) {
         this.admins.delete(client.uid);
+      }
+      if (removed) {
+        this.notifyViewerCount(client.uid);
       }
     }
 
     this.clients.delete(ws);
   }
 
-  sendCommand(
-    uid: string,
-    command: DeviceCommand,
-    options?: CommandDeliveryOptions
-  ): boolean {
+  /** Transport only: what a command means for session state lives in services/commandDispatch.ts. */
+  sendToDevice(uid: string, payload: object): boolean {
     const ws = this.devices.get(uid);
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return false;
     }
-
-    ws.send(JSON.stringify(formatCommandForDevice(command, options)));
-
-    console.log(`Command sent via WebSocket: uid=${uid} command=${command}`);
-
-    if (command === "START_REMOTE_ADMIN") {
-      void setRemoteAdminActive(uid, true);
-      setRemoteSessionActive(uid, true);
-      this.sendSignalingHint(uid);
-    } else if (command === "STOP_REMOTE_ADMIN" || command === "LOCK_DEVICE") {
-      void setRemoteAdminActive(uid, false);
-      setRemoteSessionActive(uid, false);
-    }
-
+    ws.send(JSON.stringify(payload));
     return true;
   }
 
@@ -262,6 +251,21 @@ export class ConnectionHub {
         ws.send(message);
       }
     });
+  }
+
+  onViewerCountChange(listener: ViewerCountListener): void {
+    this.viewerListeners.push(listener);
+  }
+
+  viewerCount(uid: string): number {
+    return this.admins.get(uid)?.size ?? 0;
+  }
+
+  private notifyViewerCount(uid: string): void {
+    const viewers = this.viewerCount(uid);
+    for (const listener of this.viewerListeners) {
+      listener(uid, viewers);
+    }
   }
 
   isDeviceOnline(uid: string): boolean {

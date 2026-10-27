@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import type { User } from "oidc-client-ts";
 import type { SignalingStatus, ControlPacket } from "../types";
+import { isAuthRejection, reconnectDelayMs } from "../utils/reconnectDelay";
 
 const WS_BASE = import.meta.env.VITE_WS_BASE ?? "";
 const DEVICE_OFFLINE_DEBOUNCE_MS = 6_000;
@@ -70,67 +71,80 @@ export function useAdminWebSocket(uid: string | undefined, user: User | null) {
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = WS_BASE || `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(`${host}/ws/admin`);
+    const token = user.access_token;
+    let disposed = false;
+    let attempt = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    ws.onopen = () => {
-      ws.send(
-        JSON.stringify({
-          type: "auth",
-          role: "admin",
-          uid,
-          token: user.access_token,
-        })
-      );
-    };
+    // Reconnects with backoff after drops (server restart, network blip). The server keeps a
+    // remote session alive for a short grace when the last viewer disconnects, so a quick
+    // reconnect resumes it.
+    const connect = () => {
+      const ws = new WebSocket(`${host}/ws/admin`);
+      wsRef.current = ws;
 
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data) as Record<string, unknown>;
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ type: "auth", role: "admin", uid, token }));
+      };
 
-      if (msg.type === "auth_ok") {
-        setConnected(true);
-        return;
-      }
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data) as Record<string, unknown>;
 
-      if (msg.type === "device_status") {
-        if (msg.online) {
-          markDeviceOnline();
-        } else {
-          markDeviceOfflineSoon();
+        if (msg.type === "auth_ok") {
+          attempt = 0;
+          setConnected(true);
+          return;
         }
-        return;
-      }
 
-      if (msg.type === "webrtc") {
-        onWebRtcRef.current?.(msg);
-        return;
-      }
-
-      if (msg.type === "device_event") {
-        setLastEvent(msg);
-        return;
-      }
-
-      if (msg.type === "signaling_status") {
-        const status = msg as unknown as SignalingStatus;
-        setSignalingStatus(status);
-        if (status.deviceWsConnected) {
-          markDeviceOnline();
+        if (msg.type === "device_status") {
+          if (msg.online) {
+            markDeviceOnline();
+          } else {
+            markDeviceOfflineSoon();
+          }
+          return;
         }
-      }
+
+        if (msg.type === "webrtc") {
+          onWebRtcRef.current?.(msg);
+          return;
+        }
+
+        if (msg.type === "device_event") {
+          setLastEvent(msg);
+          return;
+        }
+
+        if (msg.type === "signaling_status") {
+          const status = msg as unknown as SignalingStatus;
+          setSignalingStatus(status);
+          if (status.deviceWsConnected) {
+            markDeviceOnline();
+          }
+        }
+      };
+
+      ws.onclose = (event) => {
+        if (wsRef.current === ws) wsRef.current = null;
+        setConnected(false);
+        if (disposed) return;
+        // Our own link dropped; we don't know the device's state, so don't flash it offline.
+        markDeviceOfflineSoon();
+        if (isAuthRejection(event.code)) {
+          // A new token (silent renew) re-runs this effect; retrying this one can't succeed.
+          return;
+        }
+        retryTimer = setTimeout(connect, reconnectDelayMs(attempt++));
+      };
     };
 
-    ws.onclose = () => {
-      setConnected(false);
-      clearOfflineTimer();
-      setDeviceReconnecting(false);
-      setDeviceOnline(false);
-    };
-
-    wsRef.current = ws;
+    connect();
 
     return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
       clearOfflineTimer();
-      ws.close();
+      wsRef.current?.close();
       wsRef.current = null;
     };
   }, [uid, user?.access_token, markDeviceOnline, markDeviceOfflineSoon, clearOfflineTimer]);

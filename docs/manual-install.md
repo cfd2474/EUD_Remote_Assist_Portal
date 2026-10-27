@@ -48,10 +48,8 @@ Required values:
 | `OIDC_AUDIENCE` | `eud-remote-assist` (optional) |
 | `NGINX_BIND_ADDR` | `127.0.0.1` when using host nginx (recommended) |
 | `HTTP_PORT` | `8091` when host nginx proxies to loopback (see host nginx examples) |
-| `GITHUB_APK_REPO` | `owner/repo` with `.apk` GitHub Releases |
-| `GITHUB_TOKEN` | Optional in `.env`; or use **Portal Configuration** in the admin UI |
 
-See [github-apk-config.md](github-apk-config.md) for GitHub token setup (default: no token; optional classic `public_repo` token).  
+The app APK ships in `dist/` and the console hosts it: see [app-hosting.md](app-hosting.md).  
 See [authentik-setup.md](authentik-setup.md) for OIDC configuration.  
 For **infra-TAK** co-deploy (Caddy, port 8767): [infratak-integration.md](infratak-integration.md).
 
@@ -80,14 +78,16 @@ Verify:
 
 ```bash
 cat VERSION
-# 2.2.9
+# e.g. 3.1.7
 
 curl http://127.0.0.1:8091/health
-# {"status":"ok","service":"eud-remote-assist-portal","version":"2.2.9"}
+# {"status":"ok","service":"eud-remote-assist-portal","version":"3.1.7"}
 
 curl http://127.0.0.1:8091/version
-# {"version":"2.2.9","service":"eud-remote-assist-portal"}
+# {"version":"3.1.7","service":"eud-remote-assist-portal"}
 ```
+
+The running version must equal `VERSION`.
 
 See [versioning.md](versioning.md) for install automation and version checks.
 
@@ -107,6 +107,11 @@ curl -sS http://127.0.0.1:8091/version   # confirm running version matches VERSI
 
 Database migrations run automatically when the server container starts.
 
+Two things to keep stable, or the portal comes back with an empty database or can't connect to it:
+
+- **The install folder name** (`/opt/eud-remote-assist`). Docker Compose names the database volume after the project, which is the folder name. A renamed folder starts a new, empty volume. The old data is still there under the old name.
+- **`POSTGRES_PASSWORD` in `.env`.** Postgres reads it only when the volume is first created. Changing it later doesn't change the database password; it just locks the server out.
+
 ## 7. Firewall
 
 Allow HTTP/HTTPS only:
@@ -117,6 +122,8 @@ sudo ufw allow 443/tcp   # Admin portal
 sudo ufw allow 8448/tcp  # Android device API
 sudo ufw enable
 ```
+
+If you run your own TURN server for remote view, also open its listening port and its UDP relay range. See the README's *Azure Deployment Requirements* for the ports.
 
 ## 8. MDM / Android clients
 

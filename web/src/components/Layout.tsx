@@ -1,6 +1,7 @@
 import { useAuth } from "react-oidc-context";
 import { Link, Outlet } from "react-router-dom";
 import { AppFooter } from "./AppFooter";
+import { ClientConfigProvider } from "../config/clientConfig";
 
 export function Layout() {
   const auth = useAuth();
@@ -47,7 +48,9 @@ export function Layout() {
         </nav>
       </div>
       <main className="app-main">
-        <Outlet />
+        <ClientConfigProvider>
+          <Outlet />
+        </ClientConfigProvider>
       </main>
       <AppFooter />
     </div>

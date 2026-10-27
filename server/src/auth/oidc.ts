@@ -8,7 +8,12 @@ export interface AdminUser extends JWTPayload {
   email?: string;
   preferred_username?: string;
   name?: string;
+  groups?: string[];
 }
+
+export type AdminTokenResult =
+  | { ok: true; user: AdminUser }
+  | { ok: false; reason: "invalid" | "forbidden"; user?: AdminUser };
 
 declare global {
   namespace Express {
@@ -16,6 +21,44 @@ declare global {
       adminUser?: AdminUser;
     }
   }
+}
+
+/** Admins are allowed by email or by group membership; with neither configured, no one is (fails closed). */
+function isAuthorizedAdmin(user: AdminUser): boolean {
+  if (config.oidc.adminEmails && user.email) {
+    if (config.oidc.adminEmails.includes(user.email.toLowerCase())) {
+      return true;
+    }
+  }
+
+  if (config.oidc.adminGroup) {
+    const groups = Array.isArray(user.groups) ? user.groups : [];
+    if (groups.includes(config.oidc.adminGroup)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/** Verify an OIDC access token and check admin authorization. Shared by REST and WebSocket. */
+export async function verifyAdminToken(token: string): Promise<AdminTokenResult> {
+  let user: AdminUser;
+  try {
+    const { payload } = await jwtVerify(token, jwks, {
+      issuer: config.oidc.issuer,
+      ...(config.oidc.audience ? { audience: config.oidc.audience } : {}),
+    });
+    user = payload as AdminUser;
+  } catch {
+    return { ok: false, reason: "invalid" };
+  }
+
+  if (!isAuthorizedAdmin(user)) {
+    return { ok: false, reason: "forbidden", user };
+  }
+
+  return { ok: true, user };
 }
 
 export async function requireAdmin(
@@ -29,41 +72,16 @@ export async function requireAdmin(
     return;
   }
 
-  const token = authHeader.slice(7);
-  try {
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: config.oidc.issuer,
-      ...(config.oidc.audience ? { audience: config.oidc.audience } : {}),
-    });
-    
-    const adminUser = payload as AdminUser;
-    
-    // Authorization check
-    let authorized = false;
-    
-    // Check Email
-    if (config.oidc.adminEmails && adminUser.email) {
-      if (config.oidc.adminEmails.includes(adminUser.email.toLowerCase())) {
-        authorized = true;
-      }
-    }
-    
-    // Check Groups
-    if (!authorized && config.oidc.adminGroup) {
-      const groups = (payload.groups as string[]) || [];
-      if (groups.includes(config.oidc.adminGroup)) {
-        authorized = true;
-      }
-    }
-
-    if (!authorized) {
+  const result = await verifyAdminToken(authHeader.slice(7));
+  if (!result.ok) {
+    if (result.reason === "forbidden") {
       res.status(403).json({ error: "Forbidden: Account is not authorized as an admin" });
-      return;
+    } else {
+      res.status(401).json({ error: "Invalid or expired token" });
     }
-
-    req.adminUser = adminUser;
-    next();
-  } catch {
-    res.status(401).json({ error: "Invalid or expired token" });
+    return;
   }
+
+  req.adminUser = result.user;
+  next();
 }

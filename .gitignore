@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# The repo-root dist/ holds the app APK that ships with each release (seeded at startup).
+!/dist/
 build/
 *.tsbuildinfo
 .env
@@ -12,6 +14,32 @@ nginx/certs/*.pem
 docs/dev-server-credentials.md
 docker-compose.override.yml
 *.apk
+!/dist/*.apk
+# Console APK store (written by the server from dist/ at startup)
+data/apk/
 
 # Reports
 azure_nsg_configuration_report.md
+
+# Host access notes (contain live credentials)
+REMOTE_SERVER.md
+docs/REMOTE_SERVER.md
+
+# Local working files (process notes, may name hosts) — public repo
+CLAUDE.md
+PROJECT_STATE.md
+docs/CLEANUP_ASSESSMENT.md
+
+# Emulator e2e: generated env and run artifacts
+e2e/.env.e2e
+e2e/artifacts/
+e2e/seed/
+
+# Android signing credentials and keystores (never commit)
+keystore.properties
+*.jks
+*.keystore
+
+# Public-mirror needles (private values; see scripts/make-public-needles.sh)
+.public-needles
+.public-needles.extra

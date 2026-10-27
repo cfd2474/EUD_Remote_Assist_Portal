@@ -1,0 +1,4 @@
+# Shell scripts run in bash (Git Bash, Linux hosts, containers); CRLF breaks them.
+*.sh text eol=lf
+# The release app in dist/ is binary; never touch its bytes.
+*.apk binary

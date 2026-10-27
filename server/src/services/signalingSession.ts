@@ -44,25 +44,54 @@ interface SessionState {
 
 const sessions = new Map<string, SessionState>();
 
+function newSession(): SessionState {
+  return {
+    remoteActive: false,
+    offerSent: false,
+    answerReceived: false,
+    adminIceCount: 0,
+    deviceIceCount: 0,
+    deviceHttpPosts: 0,
+    lastActivityAt: new Date(),
+    trace: [],
+    pendingToDevice: [],
+    pendingToAdmin: [],
+    lastDeviceAnswer: null,
+  };
+}
+
+/** Writers create a session; readers (status, replay, drains) must not, or any GET would add one. */
 function getOrCreate(uid: string): SessionState {
   let session = sessions.get(uid);
   if (!session) {
-    session = {
-      remoteActive: false,
-      offerSent: false,
-      answerReceived: false,
-      adminIceCount: 0,
-      deviceIceCount: 0,
-      deviceHttpPosts: 0,
-      lastActivityAt: new Date(),
-      trace: [],
-      pendingToDevice: [],
-      pendingToAdmin: [],
-      lastDeviceAnswer: null,
-    };
+    session = newSession();
     sessions.set(uid, session);
   }
   return session;
+}
+
+const IDLE_SESSION_MS = 60 * 60_000;
+const IDLE_ACTIVE_SESSION_MS = 24 * 60 * 60_000;
+
+/**
+ * Forget sessions with no signaling activity: after 1 h when not remote-active, after 24 h
+ * when a session was left marked active (for example a STOP that never arrived).
+ */
+export function pruneIdleSessions(now: Date = new Date()): number {
+  let pruned = 0;
+  for (const [uid, session] of sessions) {
+    const idleMs = now.getTime() - session.lastActivityAt.getTime();
+    const limit = session.remoteActive ? IDLE_ACTIVE_SESSION_MS : IDLE_SESSION_MS;
+    if (idleMs > limit) {
+      sessions.delete(uid);
+      pruned += 1;
+    }
+  }
+  return pruned;
+}
+
+export function signalingSessionCount(): number {
+  return sessions.size;
 }
 
 function kindFromMessage(msg: NormalizedSignaling): SignalingKind {
@@ -184,21 +213,24 @@ export function recordUnrecognizedDeviceMessage(uid: string, preview: string): v
 }
 
 export function drainPendingToDevice(uid: string): NormalizedSignaling[] {
-  const session = getOrCreate(uid);
+  const session = sessions.get(uid);
+  if (!session) return [];
   const pending = [...session.pendingToDevice];
   session.pendingToDevice = [];
   return pending;
 }
 
 export function drainPendingToAdmin(uid: string): NormalizedSignaling[] {
-  const session = getOrCreate(uid);
+  const session = sessions.get(uid);
+  if (!session) return [];
   const pending = [...session.pendingToAdmin];
   session.pendingToAdmin = [];
   return pending;
 }
 
 export function getSignalingReplay(uid: string): NormalizedSignaling[] {
-  const session = getOrCreate(uid);
+  const session = sessions.get(uid);
+  if (!session) return [];
   const replay: NormalizedSignaling[] = [];
   if (session.lastDeviceAnswer) {
     replay.push(session.lastDeviceAnswer);
@@ -211,7 +243,7 @@ export function getSignalingReplay(uid: string): NormalizedSignaling[] {
 }
 
 export function getSignalingStatus(uid: string): SignalingStatus {
-  const session = getOrCreate(uid);
+  const session = sessions.get(uid) ?? newSession();
   const issues: string[] = [];
 
   if (session.remoteActive && session.offerSent && !session.answerReceived) {

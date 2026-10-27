@@ -1,11 +1,11 @@
 import { useEffect } from "react";
 import {
   MapContainer,
-  TileLayer,
   Marker,
   Popup,
   useMap,
 } from "react-leaflet";
+import { BaseTileLayer } from "./BaseTileLayer";
 import L from "leaflet";
 import type { LocationHistoryPoint } from "../types";
 
@@ -77,10 +77,7 @@ export function LocationHistoryMap({
   return (
     <div className="location-history-map">
       <MapContainer center={defaultCenter} zoom={14} scrollWheelZoom>
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        <BaseTileLayer />
         <FitBounds points={points} />
         {focusPoint ? (
           <MapFocus

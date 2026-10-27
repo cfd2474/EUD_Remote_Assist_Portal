@@ -1,5 +1,5 @@
 import type { User } from "oidc-client-ts";
-import type { ControlPacket, Device, DeviceCommand, LatestApkRelease, LocationHistoryPoint, PortalGithubConfig, SignalingStatus } from "../types";
+import type { ClientConfig, ControlPacket, Device, DeviceCommand, LatestApkRelease, LocationHistoryPoint, PortalConfig, SignalingStatus } from "../types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "";
 
@@ -38,7 +38,7 @@ export async function fetchDevices(user: User): Promise<Device[]> {
 
 export async function fetchDevice(user: User, uid: string): Promise<Device> {
   const data = await apiFetch<{ device: Device }>(
-    `/api/admin/devices/${uid}`,
+    `/api/admin/devices/${encodeURIComponent(uid)}`,
     user
   );
   return data.device;
@@ -49,21 +49,21 @@ export async function sendCommand(
   uid: string,
   command: DeviceCommand,
   options?: { pin?: string }
-): Promise<{ delivery: "websocket" | "queued" }> {
+): Promise<{ delivery: "websocket" | "queued"; expiresInSeconds?: number }> {
   const body: { command: DeviceCommand; pin?: string } = { command };
   if (options?.pin) {
     body.pin = options.pin;
   }
 
-  const data = await apiFetch<{ delivery: "websocket" | "queued" }>(
-    `/api/admin/devices/${uid}/command`,
+  const data = await apiFetch<{ delivery: "websocket" | "queued"; expiresInSeconds?: number }>(
+    `/api/admin/devices/${encodeURIComponent(uid)}/command`,
     user,
     {
       method: "POST",
       body: JSON.stringify(body),
     }
   );
-  return { delivery: data.delivery };
+  return { delivery: data.delivery, expiresInSeconds: data.expiresInSeconds };
 }
 
 export async function sendControl(
@@ -71,14 +71,14 @@ export async function sendControl(
   uid: string,
   packet: ControlPacket
 ): Promise<void> {
-  await apiFetch(`/api/admin/devices/${uid}/control`, user, {
+  await apiFetch(`/api/admin/devices/${encodeURIComponent(uid)}/control`, user, {
     method: "POST",
     body: JSON.stringify(packet),
   });
 }
 
 export async function removeDevice(user: User, uid: string): Promise<void> {
-  await apiFetch(`/api/admin/devices/${uid}`, user, {
+  await apiFetch(`/api/admin/devices/${encodeURIComponent(uid)}`, user, {
     method: "DELETE",
   });
 }
@@ -88,7 +88,7 @@ export async function fetchSignalingStatus(
   uid: string
 ): Promise<SignalingStatus> {
   const data = await apiFetch<{ signaling: SignalingStatus }>(
-    `/api/admin/devices/${uid}/signaling`,
+    `/api/admin/devices/${encodeURIComponent(uid)}/signaling`,
     user
   );
   return data.signaling;
@@ -99,7 +99,7 @@ export async function fetchSignalingReplay(
   uid: string
 ): Promise<{ messages: Record<string, unknown>[] }> {
   return apiFetch<{ messages: Record<string, unknown>[] }>(
-    `/api/admin/devices/${uid}/signaling/replay`,
+    `/api/admin/devices/${encodeURIComponent(uid)}/signaling/replay`,
     user
   );
 }
@@ -134,7 +134,7 @@ export async function fetchLocationHistory(
     params.set("full", "1");
   }
   const data = await apiFetch<{ points: LocationHistoryPoint[] }>(
-    `/api/admin/devices/${uid}/location-history?${params}`,
+    `/api/admin/devices/${encodeURIComponent(uid)}/location-history?${params}`,
     user
   );
   return data.points;
@@ -150,32 +150,8 @@ export async function fetchLatestApk(user: User): Promise<LatestApkRelease> {
 
 export async function fetchPortalConfig(
   user: User
-): Promise<PortalGithubConfig> {
-  return apiFetch<PortalGithubConfig>("/api/admin/portal-config", user);
-}
-
-export async function applyPortalGithubToken(
-  user: User,
-  token: string
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
-    "/api/admin/portal-config/github",
-    user,
-    {
-      method: "PUT",
-      body: JSON.stringify({ token }),
-    }
-  );
-}
-
-export async function clearPortalGithubToken(
-  user: User
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
-    "/api/admin/portal-config/github",
-    user,
-    { method: "DELETE" }
-  );
+): Promise<PortalConfig> {
+  return apiFetch<PortalConfig>("/api/admin/portal-config", user);
 }
 
 export async function applyPortalTurnSettings(
@@ -183,8 +159,8 @@ export async function applyPortalTurnSettings(
   turnServerUrl: string,
   turnUsername?: string,
   turnCredential?: string
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
+): Promise<PortalConfig & { ok: true }> {
+  return apiFetch<PortalConfig & { ok: true }>(
     "/api/admin/portal-config/turn",
     user,
     {
@@ -196,26 +172,16 @@ export async function applyPortalTurnSettings(
 
 export async function clearPortalTurnSettings(
   user: User
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
+): Promise<PortalConfig & { ok: true }> {
+  return apiFetch<PortalConfig & { ok: true }>(
     "/api/admin/portal-config/turn",
     user,
     { method: "DELETE" }
   );
 }
 
-export async function applyPortalServerPort(
-  user: User,
-  port: number
-): Promise<PortalGithubConfig & { ok: true }> {
-  return apiFetch<PortalGithubConfig & { ok: true }>(
-    "/api/admin/portal-config/server-port",
-    user,
-    {
-      method: "PUT",
-      body: JSON.stringify({ port }),
-    }
-  );
+export async function fetchClientConfig(user: User): Promise<ClientConfig> {
+  return apiFetch<ClientConfig>("/api/admin/client-config", user);
 }
 
 export interface EnrollmentToken {

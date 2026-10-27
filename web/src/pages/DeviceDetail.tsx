@@ -1,70 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "react-oidc-context";
-import { fetchDevice, fetchLatestApk, removeDevice, sendCommand } from "../api/client";
+import { removeDevice, sendCommand } from "../api/client";
 import { useAdminWebSocket } from "../hooks/useAdminWebSocket";
+import { useActionBanner } from "../hooks/device/useActionBanner";
+import { useDeviceRecord } from "../hooks/device/useDeviceRecord";
+import { useInactivityTimeout } from "../hooks/device/useInactivityTimeout";
+import { useLatestApkVersion } from "../hooks/device/useLatestApkVersion";
+import { useRemoteUnlock } from "../hooks/device/useRemoteUnlock";
+import { useStreamLayout } from "../hooks/device/useStreamLayout";
 import { DeviceLocationPanel } from "../components/DeviceLocationPanel";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { RemoteViewer } from "../components/RemoteViewer";
 import type { Device, DeviceCommand } from "../types";
-import { isLayoutEvent, parseStreamDimensions, parseStreamOrientation } from "../utils/streamDimensions";
+import { isLayoutEvent } from "../utils/streamDimensions";
 import { formatPhoneNumber } from "../utils/formatPhoneNumber";
 import { isNewerVersion } from "../utils/compareSemver";
-import type { StreamDimensions, StreamOrientation } from "../utils/streamDimensions";
+import { queuedExpiryText } from "../utils/queuedExpiry";
 
 export function DeviceDetail() {
   const { uid } = useParams<{ uid: string }>();
   const navigate = useNavigate();
   const auth = useAuth();
-  const [device, setDevice] = useState<Device | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [fadeClass, setFadeClass] = useState("");
-  const [queuedCommand, setQueuedCommand] = useState<string | null>(null);
-  const fadeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const removeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showBannerMessage = useCallback((message: string, isQueued: boolean = false, command: string | null = null) => {
-    if (fadeTimeoutRef.current) {
-      clearTimeout(fadeTimeoutRef.current);
-      fadeTimeoutRef.current = null;
-    }
-    if (removeTimeoutRef.current) {
-      clearTimeout(removeTimeoutRef.current);
-      removeTimeoutRef.current = null;
-    }
-    setFadeClass("");
-    setActionMessage(message);
-    
-    if (isQueued) {
-      setQueuedCommand(command);
-    } else {
-      setQueuedCommand(null);
-      fadeTimeoutRef.current = setTimeout(() => {
-        setFadeClass("fade-out");
-        removeTimeoutRef.current = setTimeout(() => {
-          setActionMessage(null);
-          setFadeClass("");
-        }, 500);
-      }, 3000);
-    }
-  }, []);
+  const { connected, deviceOnline, deviceReconnecting, lastEvent, signalingStatus, sendWebRtc, sendControl, setWebRtcHandler } =
+    useAdminWebSocket(uid, auth.user ?? null);
+  const banner = useActionBanner(deviceOnline);
+  const { show: showBanner, clear: clearBanner } = banner;
+  const layout = useStreamLayout();
+  const unlock = useRemoteUnlock(auth.user, uid, banner);
+  const latestApkVersion = useLatestApkVersion(auth.user);
 
-  const clearBannerMessage = useCallback(() => {
-    if (fadeTimeoutRef.current) {
-      clearTimeout(fadeTimeoutRef.current);
-      fadeTimeoutRef.current = null;
-    }
-    if (removeTimeoutRef.current) {
-      clearTimeout(removeTimeoutRef.current);
-      removeTimeoutRef.current = null;
-    }
-    setFadeClass("");
-    setQueuedCommand(null);
-    setActionMessage(null);
-  }, []);
   const [remoteActive, setRemoteActive] = useState(false);
+  // Each Connect starts a new session id; WEBRTC_READY only counts for the current one.
   const [remoteSessionId, setRemoteSessionId] = useState(0);
   const [webrtcReadySessionId, setWebrtcReadySessionId] = useState(0);
   const remoteSessionIdRef = useRef(0);
@@ -73,73 +41,23 @@ export function DeviceDetail() {
   const [lockModalOpen, setLockModalOpen] = useState(false);
   const [constrainedModalOpen, setConstrainedModalOpen] = useState(false);
   const [locking, setLocking] = useState(false);
-  const [deviceLocked, setDeviceLocked] = useState(false);
-  const [deviceLockedReason, setDeviceLockedReason] = useState<string | null>(
-    null
-  );
-  const [unlockPin, setUnlockPin] = useState("");
-  const [unlocking, setUnlocking] = useState(false);
-  const [streamLayoutHint, setStreamLayoutHint] = useState<StreamDimensions | null>(
-    null
-  );
-  const [streamLayoutRevision, setStreamLayoutRevision] = useState(0);
-  const [deviceOrientation, setDeviceOrientation] = useState<StreamOrientation | null>(
-    null
-  );
-  const [latestApkVersion, setLatestApkVersion] = useState<string | null>(null);
-  const initialLoadDone = useRef(false);
-  const unlockTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [showInactivityModal, setShowInactivityModal] = useState(false);
-  const [countdown, setCountdown] = useState(120);
-  const lastActivityRef = useRef<number>(Date.now());
-  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const authUserRef = useRef(auth.user);
-  const uidRef = useRef(uid);
-  const remoteActiveRef = useRef(remoteActive);
-
-  // Sync refs with state/props
-  useEffect(() => {
-    authUserRef.current = auth.user;
-    uidRef.current = uid;
-    remoteActiveRef.current = remoteActive;
-  }, [auth.user, uid, remoteActive]);
-
-  const { connected, deviceOnline, deviceReconnecting, lastEvent, signalingStatus, sendWebRtc, sendControl, setWebRtcHandler } =
-    useAdminWebSocket(uid, auth.user ?? null);
-
-  const loadDevice = useCallback(async () => {
-    if (!auth.user || !uid) return;
-    try {
-      const data = await fetchDevice(auth.user, uid);
-      setDevice(data);
-      if (!initialLoadDone.current) {
-        setRemoteActive(data.remote_admin_active);
-        initialLoadDone.current = true;
-      } else if (data.remote_admin_active) {
-        setRemoteActive(true);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load device");
-    } finally {
-      setLoading(false);
+  // The server's remote_admin_active seeds the page once; later polls can only turn it on.
+  const onDeviceLoaded = useCallback((data: Device, isFirstLoad: boolean) => {
+    if (isFirstLoad) {
+      setRemoteActive(data.remote_admin_active);
+    } else if (data.remote_admin_active) {
+      setRemoteActive(true);
     }
-  }, [auth.user, uid]);
+  }, []);
+  const { device, loading, error, refresh: refreshDeviceMeta } = useDeviceRecord(auth.user, uid, onDeviceLoaded);
 
-  const refreshDeviceMeta = useCallback(async () => {
-    if (!auth.user || !uid) return;
-    try {
-      const data = await fetchDevice(auth.user, uid);
-      setDevice(data);
-    } catch {
-      // Keep existing device card data if a background refresh fails.
-    }
-  }, [auth.user, uid]);
+  const { reset: resetUnlock, markLocked, onUnlockHandled, onUnlockFailed } = unlock;
+  const { apply: applyLayout, reset: resetLayout } = layout;
 
   const runCommand = useCallback(async (command: DeviceCommand) => {
     if (!auth.user || !uid) return;
-    clearBannerMessage();
+    clearBanner();
     try {
       const result = await sendCommand(auth.user, uid, command);
       if (command === "START_REMOTE_ADMIN") {
@@ -150,293 +68,66 @@ export function DeviceDetail() {
       }
       if (command === "STOP_REMOTE_ADMIN") {
         setRemoteActive(false);
-        setDeviceLocked(false);
-        setDeviceLockedReason(null);
-        setUnlockPin("");
+        resetUnlock();
       }
       const isQueued = result.delivery === "queued";
       const message = isQueued
-        ? `Command queued: ${command} — device is not on live WebSocket; it will receive this on the next poll (usually within ~30s). Remote assist requires a live WebSocket connection.`
+        ? `Command queued: ${command} — the device is not connected right now. It receives queued commands on its next check-in (usually within ~30 s); if it does not check in within ${queuedExpiryText(result.expiresInSeconds)}, the command expires and must be sent again.`
         : `Command sent: ${command}`;
-      showBannerMessage(message, isQueued, command);
+      showBanner(message, isQueued, command);
       void refreshDeviceMeta();
     } catch (err) {
-      showBannerMessage(err instanceof Error ? err.message : "Command failed");
+      showBanner(err instanceof Error ? err.message : "Command failed");
     }
-  }, [auth.user, uid, refreshDeviceMeta, showBannerMessage, clearBannerMessage]);
+  }, [auth.user, uid, refreshDeviceMeta, showBanner, clearBanner, resetUnlock]);
 
+  const inactivity = useInactivityTimeout(remoteActive, () => void runCommand("STOP_REMOTE_ADMIN"));
+
+  // Events the device sends during a session.
   useEffect(() => {
     if (lastEvent?.event === "WEBRTC_READY") {
       setWebrtcReadySessionId(remoteSessionIdRef.current);
-      setDeviceLocked(false);
-      setDeviceLockedReason(null);
-      setUnlockPin("");
+      resetUnlock();
     }
     if (isLayoutEvent(String(lastEvent?.event))) {
-      setStreamLayoutRevision((revision) => revision + 1);
-      const orientation = parseStreamOrientation(lastEvent?.payload);
-      if (orientation) setDeviceOrientation(orientation);
-      const dimensions = parseStreamDimensions(lastEvent?.payload);
-      if (dimensions) setStreamLayoutHint(dimensions);
+      applyLayout(lastEvent?.payload);
     }
     if (lastEvent?.event === "DEVICE_LOCKED") {
-      setDeviceLocked(true);
       const payload = lastEvent.payload as Record<string, unknown> | undefined;
-      const reason =
-        typeof payload?.reason === "string"
-          ? payload.reason
-          : "PIN required for full access";
-      setDeviceLockedReason(reason);
+      markLocked(typeof payload?.reason === "string" ? payload.reason : "PIN required for full access");
     }
     if (lastEvent?.event === "WEBRTC_UNAVAILABLE") {
       setConstrainedModalOpen(true);
     }
     if (lastEvent?.event === "COMMAND_HANDLED") {
       const payload = lastEvent.payload as Record<string, unknown> | undefined;
-      const handledCommand =
-        typeof payload?.command === "string" ? payload.command : null;
-      if (handledCommand === "REMOTE_UNLOCK") {
-        if (unlockTimeoutRef.current) {
-          clearTimeout(unlockTimeoutRef.current);
-          unlockTimeoutRef.current = null;
-        }
-        setUnlocking(false);
-        setDeviceLocked(false);
-        setDeviceLockedReason(null);
-        setUnlockPin("");
-        showBannerMessage("Unlock command processed — waiting for video stream…");
-      }
+      if (payload?.command === "REMOTE_UNLOCK") onUnlockHandled();
     }
     if (lastEvent?.event === "COMMAND_FAILED") {
       const payload = lastEvent.payload as Record<string, unknown> | undefined;
-      const failedCommand =
-        typeof payload?.command === "string" ? payload.command : null;
-      const error =
-        typeof payload?.error === "string" ? payload.error : "Command failed";
-      if (failedCommand === "REMOTE_UNLOCK") {
-        if (unlockTimeoutRef.current) {
-          clearTimeout(unlockTimeoutRef.current);
-          unlockTimeoutRef.current = null;
-        }
-        setUnlocking(false);
-        setDeviceLockedReason("Incorrect pin/password. Try again.");
-        showBannerMessage(`Unlock failed: ${error}`);
+      if (payload?.command === "REMOTE_UNLOCK") {
+        onUnlockFailed(typeof payload?.error === "string" ? payload.error : "Command failed");
       }
     }
-  }, [lastEvent, showBannerMessage]);
+  }, [lastEvent, resetUnlock, applyLayout, markLocked, onUnlockHandled, onUnlockFailed]);
 
-  useEffect(() => {
-    if (deviceOnline && queuedCommand) {
-      let transitionMessage = `Command sent: ${queuedCommand}`;
-      if (queuedCommand === "REMOTE_UNLOCK") {
-        transitionMessage = "Unlock command sent — device is entering the PIN…";
-      } else if (queuedCommand === "LOCK_DEVICE") {
-        transitionMessage = "Lock command sent. Remote assist has been stopped.";
-      }
-      showBannerMessage(transitionMessage, false, null);
-    }
-  }, [deviceOnline, queuedCommand, showBannerMessage]);
-
-  useEffect(() => {
-    if (remoteActive) {
-      lastActivityRef.current = Date.now();
-      setShowInactivityModal(false);
-    } else {
-      setStreamLayoutHint(null);
-      setStreamLayoutRevision(0);
-      setDeviceOrientation(null);
-      setDeviceLocked(false);
-      setDeviceLockedReason(null);
-      setUnlockPin("");
-      setShowInactivityModal(false);
-    }
-  }, [remoteActive]);
-
-  useEffect(() => {
-    void loadDevice();
-    const interval = setInterval(() => void loadDevice(), 10000);
-    return () => clearInterval(interval);
-  }, [loadDevice]);
-
-  // Tab-close/refresh beforeunload handler
-  useEffect(() => {
-    if (!remoteActive || !uid || !auth.user) return;
-
-    const handleBeforeUnload = () => {
-      const url = `${import.meta.env.VITE_API_BASE ?? ""}/api/admin/devices/${uid}/command`;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (auth.user?.access_token) {
-        headers.Authorization = `Bearer ${auth.user.access_token}`;
-      }
-      void fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ command: "STOP_REMOTE_ADMIN" }),
-        keepalive: true,
-      });
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-    };
-  }, [remoteActive, uid, auth.user]);
-
-  // SPA navigation unmount handler
-  useEffect(() => {
-    return () => {
-      if (remoteActiveRef.current && authUserRef.current && uidRef.current) {
-        void sendCommand(authUserRef.current, uidRef.current, "STOP_REMOTE_ADMIN").catch((err) => {
-          console.warn("Failed to stop remote admin on navigation:", err);
-        });
-      }
-      if (unlockTimeoutRef.current) {
-        clearTimeout(unlockTimeoutRef.current);
-        unlockTimeoutRef.current = null;
-      }
-      if (fadeTimeoutRef.current) {
-        clearTimeout(fadeTimeoutRef.current);
-        fadeTimeoutRef.current = null;
-      }
-      if (removeTimeoutRef.current) {
-        clearTimeout(removeTimeoutRef.current);
-        removeTimeoutRef.current = null;
-      }
-    };
-  }, []);
-
-  // Inactivity detection check
+  // Ending a session clears what belonged to it. (The inactivity prompt resets itself.)
   useEffect(() => {
     if (!remoteActive) {
-      return;
+      resetLayout();
+      resetUnlock();
     }
+  }, [remoteActive, resetLayout, resetUnlock]);
 
-    const checkInterval = setInterval(() => {
-      if (!showInactivityModal) {
-        if (Date.now() - lastActivityRef.current >= 300_000) {
-          setShowInactivityModal(true);
-          setCountdown(120);
-        }
-      }
-    }, 1000);
-
-    return () => {
-      clearInterval(checkInterval);
-    };
-  }, [remoteActive, showInactivityModal]);
-
-  // Countdown timer decrement
-  useEffect(() => {
-    if (!showInactivityModal) {
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = null;
-      }
-      return;
-    }
-
-    countdownIntervalRef.current = setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current);
-            countdownIntervalRef.current = null;
-          }
-          setShowInactivityModal(false);
-          void runCommand("STOP_REMOTE_ADMIN");
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-        countdownIntervalRef.current = null;
-      }
-    };
-  }, [showInactivityModal, runCommand]);
-
-  const handleActivity = useCallback(() => {
-    lastActivityRef.current = Date.now();
-  }, []);
-
-  const handleKeepActive = useCallback(() => {
-    setShowInactivityModal(false);
-    lastActivityRef.current = Date.now();
-  }, []);
-
-  const handleTerminateSession = useCallback(() => {
-    setShowInactivityModal(false);
-    void runCommand("STOP_REMOTE_ADMIN");
-  }, [runCommand]);
-
-  useEffect(() => {
-    if (!auth.user) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadLatestApk = async () => {
-      try {
-        const latest = await fetchLatestApk(auth.user!);
-        if (!cancelled) {
-          setLatestApkVersion(latest.version);
-        }
-      } catch {
-        if (!cancelled) {
-          setLatestApkVersion(null);
-        }
-      }
-    };
-
-    void loadLatestApk();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [auth.user]);
-
-
-
-  const handleRemoteUnlock = async () => {
-    if (!auth.user || !uid || !unlockPin.trim()) return;
-
-    setUnlocking(true);
-    clearBannerMessage();
-    try {
-      const result = await sendCommand(auth.user, uid, "REMOTE_UNLOCK", {
-        pin: unlockPin.trim(),
-      });
-      if (result.delivery === "queued") {
-        showBannerMessage("Unlock command queued — device will receive it on next poll.", true, "REMOTE_UNLOCK");
-        setUnlocking(false);
-      } else {
-        showBannerMessage("Unlock command sent — device is entering the PIN…");
-        if (unlockTimeoutRef.current) {
-          clearTimeout(unlockTimeoutRef.current);
-        }
-        unlockTimeoutRef.current = setTimeout(() => {
-          setUnlocking(false);
-          showBannerMessage("Unlock attempt timed out.");
-        }, 15000);
-      }
-    } catch (err) {
-      showBannerMessage(err instanceof Error ? err.message : "Unlock failed");
-      setUnlocking(false);
-    }
-  };
+  // Leaving the page (navigation, reload, closed tab) does not stop the remote session itself:
+  // the server stops it once the last admin viewer has gone (D8, services/viewerPresence.ts).
 
   const handleLockDevice = async () => {
     if (!auth.user || !uid) return;
 
     setLockModalOpen(false);
     setLocking(true);
-    clearBannerMessage();
+    clearBanner();
 
     try {
       if (remoteActive) {
@@ -447,12 +138,12 @@ export function DeviceDetail() {
       const result = await sendCommand(auth.user, uid, "LOCK_DEVICE");
       const isQueued = result.delivery === "queued";
       const message = isQueued
-        ? "Lock command queued — device will lock on next poll. Remote assist has been stopped."
+        ? `Lock command queued — the device locks on its next check-in (expires after ${queuedExpiryText(result.expiresInSeconds)}). Remote assist has been stopped.`
         : "Lock command sent. Remote assist has been stopped.";
-      showBannerMessage(message, isQueued, "LOCK_DEVICE");
+      showBanner(message, isQueued, "LOCK_DEVICE");
       void refreshDeviceMeta();
     } catch (err) {
-      showBannerMessage(err instanceof Error ? err.message : "Lock command failed");
+      showBanner(err instanceof Error ? err.message : "Lock command failed");
     } finally {
       setLocking(false);
     }
@@ -463,12 +154,12 @@ export function DeviceDetail() {
 
     setRemoveModalOpen(false);
     setRemoving(true);
-    clearBannerMessage();
+    clearBanner();
     try {
       await removeDevice(auth.user, uid);
       navigate("/", { replace: true });
     } catch (err) {
-      showBannerMessage(err instanceof Error ? err.message : "Failed to remove device");
+      showBanner(err instanceof Error ? err.message : "Failed to remove device");
       setRemoving(false);
     }
   };
@@ -517,9 +208,9 @@ export function DeviceDetail() {
         </div>
       </div>
 
-      {actionMessage && (
-        <p className={`action-message ${fadeClass}`} role="status">
-          {actionMessage}
+      {banner.message && (
+        <p className={`action-message ${banner.fadeClass}`} role="status">
+          {banner.message}
         </p>
       )}
 
@@ -599,15 +290,15 @@ export function DeviceDetail() {
       </ConfirmModal>
 
       <ConfirmModal
-        open={showInactivityModal}
+        open={inactivity.promptOpen}
         title="Stay connected?"
         confirmLabel="Yes"
         cancelLabel="No"
-        onConfirm={handleKeepActive}
-        onCancel={handleTerminateSession}
+        onConfirm={inactivity.keepActive}
+        onCancel={inactivity.endNow}
       >
         <p>
-          You have been inactive for 5 minutes. The remote assist session will disconnect in {countdown} seconds unless you choose to stay connected.
+          You have been inactive for 5 minutes. The remote assist session will disconnect in {inactivity.countdown} seconds unless you choose to stay connected.
         </p>
       </ConfirmModal>
 
@@ -705,19 +396,19 @@ export function DeviceDetail() {
 
       <section className="panel">
         <h2>Remote assist</h2>
-        {remoteActive && deviceLocked && (
+        {remoteActive && unlock.locked && (
           <div className="remote-unlock-panel">
             <p className="remote-unlock-title">Device is locked</p>
             <p className="remote-unlock-reason">
-              {deviceLockedReason ?? "PIN required for full access"}
+              {unlock.reason ?? "PIN required for full access"}
             </p>
             <div className="remote-unlock-form">
               <input
                 type="password"
                 className="remote-unlock-input"
                 placeholder="Device PIN"
-                value={unlockPin}
-                onChange={(event) => setUnlockPin(event.target.value)}
+                value={unlock.pin}
+                onChange={(event) => unlock.setPin(event.target.value)}
                 autoComplete="one-time-code"
                 data-lpignore="true"
                 data-1pignore="true"
@@ -726,10 +417,10 @@ export function DeviceDetail() {
               <button
                 type="button"
                 className="btn-unlock"
-                disabled={unlocking || !unlockPin.trim()}
-                onClick={() => void handleRemoteUnlock()}
+                disabled={unlock.unlocking || !unlock.pin.trim()}
+                onClick={() => void unlock.submit()}
               >
-                {unlocking ? "Standby, unlocking" : "Unlock"}
+                {unlock.unlocking ? "Standby, unlocking" : "Unlock"}
               </button>
             </div>
           </div>
@@ -746,10 +437,10 @@ export function DeviceDetail() {
           adminWsConnected={connected}
           deviceStreamReady={deviceStreamReady}
           serverAnswerReceived={signalingStatus?.answerReceived ?? false}
-          streamLayoutHint={streamLayoutHint}
-          streamLayoutRevision={streamLayoutRevision}
-          deviceOrientation={deviceOrientation}
-          onActivity={handleActivity}
+          streamLayoutHint={layout.hint}
+          streamLayoutRevision={layout.revision}
+          deviceOrientation={layout.orientation}
+          onActivity={inactivity.recordActivity}
         />
       </section>
 

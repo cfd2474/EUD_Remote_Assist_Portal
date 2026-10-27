@@ -34,12 +34,22 @@ services:
       OIDC_ADMIN_EMAILS: ${OIDC_ADMIN_EMAILS:-}
       CORS_ORIGIN: ${CORS_ORIGIN:-https://localhost}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL}
-      PHONEDB_TLS_INSECURE: ${PHONEDB_TLS_INSECURE:-true}
-      GITHUB_APK_REPO: ${GITHUB_APK_REPO:-cfd2474/EUD_Remote_Assist_Portal}
-      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      PHONEDB_TLS_INSECURE: ${PHONEDB_TLS_INSECURE:-false}
+      PHONEDB_ENABLED: ${PHONEDB_ENABLED:-}
+      # WebRTC and map/geocoder services. Empty = built-in default; "none" = off. See .env.example.
+      STUN_URLS: ${STUN_URLS:-}
+      TURN_URL: ${TURN_URL:-}
+      TURN_USERNAME: ${TURN_USERNAME:-}
+      TURN_CREDENTIAL: ${TURN_CREDENTIAL:-}
+      MAP_TILE_URL: ${MAP_TILE_URL:-}
+      MAP_TILE_ATTRIBUTION: ${MAP_TILE_ATTRIBUTION:-}
+      GEOCODER_URL: ${GEOCODER_URL:-}
+      GEOCODER_USER_AGENT: ${GEOCODER_USER_AGENT:-}
       PORTAL_SETTINGS_DIR: /app/data
     volumes:
       - ./data:/app/data
+      # The app APK that ships with this release; imported into ./data/apk at startup.
+      - ./dist:/seed:ro
     expose:
       - "3000"
 

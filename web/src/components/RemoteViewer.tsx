@@ -3,6 +3,7 @@ import type { User } from "oidc-client-ts";
 import { useRemoteVideoControl } from "../hooks/useRemoteVideoControl";
 import { useVideoStreamLayout } from "../hooks/useVideoStreamLayout";
 import { useWebRtcViewer } from "../hooks/useWebRtcViewer";
+import { useClientConfig } from "../config/clientConfig";
 
 import type { ControlPacket } from "../types";
 import type { StreamDimensions, StreamOrientation } from "../utils/streamDimensions";
@@ -59,6 +60,7 @@ export function RemoteViewer({
   deviceOrientation = null,
   onActivity,
 }: RemoteViewerProps) {
+  const { config: clientConfig } = useClientConfig();
   const { videoRef, streamActive, status, error, startSession } = useWebRtcViewer({
     sendSignaling: sendWebRtc,
     onSignaling,
@@ -70,6 +72,7 @@ export function RemoteViewer({
     serverAnswerReceived,
     layoutHint: streamLayoutHint,
     layoutRevision: streamLayoutRevision,
+    iceServers: clientConfig?.iceServers,
   });
 
   const {

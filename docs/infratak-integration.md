@@ -1,14 +1,18 @@
 # infra-TAK integration profile
 
-This document describes how [infra-TAK](https://github.com/takwerx/infra-TAK) deploys the EUD Remote Assist Portal without modifying tracked files in the git clone. After upstream **v2.1.0+**, updates are:
+This document describes how [infra-TAK](https://github.com/takwerx/infra-TAK) deploys the EUD Remote Assist Portal without modifying tracked files in the git clone. infra-TAK's **Update** button does this, roughly:
 
 ```bash
 cd ~/eud-remote-assist
-git pull --ff-only
+git fetch origin main --depth 1
+git reset --hard origin/main      # not "git pull": shallow clones break pull
+# …refresh .env and the Authentik app…
 docker compose up -d --build
 ```
 
-`git status` should remain clean (only gitignored `.env` differs).
+Stock infra-TAK follows **`main` only**, for both the version check and the update. A release pushed only to `dev` doesn't reach infra-TAK boxes.
+
+The reset discards local edits to tracked files, so keep site-specific settings in the gitignored `.env` and `docker-compose.override.yml`.
 
 Related: [versioning.md](versioning.md), [mdm-config.md](mdm-config.md), [manual-install.md](manual-install.md)
 
@@ -23,7 +27,8 @@ infra-TAK is a host orchestrator. For EUD Remote Assist it:
 3. Provisions an **Authentik OAuth2 provider** (slug `eud-remote-assist`, public SPA + PKCE)
 4. Runs **Docker Compose** from the clone (no edits to `docker-compose.yml`)
 5. Fronts the stack with **Caddy** (TLS termination, port split)
-6. On update: `git pull --ff-only` → refresh `.env` → `docker compose up -d --build`
+6. On update: fetch + hard reset to `origin/main` → refresh `.env` → `docker compose up -d --build`. The existing database password is kept: Postgres reads `POSTGRES_PASSWORD` only when the volume is first created.
+7. Optionally runs **CoTURN** for WebRTC relay (see [CoTURN](#coturn-webrtc-relay) below)
 
 ---
 
@@ -56,18 +61,21 @@ CORS_ORIGIN=https://remote.example.com
 NGINX_BIND_ADDR=127.0.0.1
 HTTP_PORT=8767
 NGINX_ENABLE_TLS=false
-PHONEDB_TLS_INSECURE=true
+PHONEDB_TLS_INSECURE=false
 GITHUB_APK_REPO=cfd2474/EUD_Remote_Assist_Portal
 ```
 
+`GITHUB_APK_REPO` is no longer read (3.3.0+). infra-TAK may keep writing it, and it's harmless.
+
+`NGINX_ENABLE_TLS` is not read by this stack (the inner nginx is always HTTP). infra-TAK writes it, and it's harmless.
+
 | Variable | infra-TAK | Notes |
 |----------|-----------|-------|
-| `GITHUB_APK_REPO` | Operator / default | Repo that publishes `.apk` releases |
-| `GITHUB_TOKEN` | Optional | Or configure later via **Portal Configuration** in the admin UI |
+| `GITHUB_APK_REPO`, `GITHUB_TOKEN` | Ignored since 3.3.0 | The console hosts the app APK from `dist/` ([app-hosting.md](app-hosting.md)) |
 
 **New required env vars:** always add to `.env.example` with a default so infra-TAK can merge on deploy.
 
-See [github-apk-config.md](github-apk-config.md) for GitHub APK lookup details.
+The app APK is served by the console at `/api/v1/app/apk` on the device port; no Caddy change is needed. See [app-hosting.md](app-hosting.md).
 
 ---
 
@@ -90,9 +98,46 @@ Internet
 Docker nginx (127.0.0.1:8767 → container :80) → server:3000 + web:80
 ```
 
-- **UFW:** infra-TAK allows `8448/tcp` publicly; denies direct access to `8767`
+- **Firewall:** infra-TAK opens `8448/tcp` publicly (UFW, and firewalld on RHEL) and denies direct access to `8767`. On relayed boxes, the TAK relay forwards 8448.
 - **No host exposure** of postgres or Node server ports
 - Inner nginx is **HTTP only** on loopback
+- **HSTS:** Caddy adds `Strict-Transport-Security`. The portal server also sends it (Helmet, `max-age=31536000; includeSubDomains`).
+- **No compressed request bodies:** Caddy drops the request `Content-Encoding` header on both vhosts, as a body-parser mitigation. Clients must send uncompressed JSON.
+
+---
+
+## CoTURN (WebRTC relay)
+
+infra-TAK can run CoTURN next to the stack, through the gitignored `docker-compose.override.yml`:
+
+| Setting | infra-TAK value |
+|---------|-----------------|
+| Image | `coturn/coturn:4.18.0` (pinned) |
+| Listening port | **3479** tcp/udp by default. 3478 belongs to NetBird's TURN server. |
+| Relay range | UDP **50000–50050** |
+| Relay transport | **UDP only** (`--no-tcp-relay`) |
+| Peers | Loopback, link-local, CGNAT, the box's own addresses and Docker subnets are always refused. 10/8 and 192.168/16 are refused unless the operator turns off **Block private peers**. |
+
+The portal takes its TURN server from one of two places. The environment wins:
+
+1. **`.env` (3.2.0+, recommended for infra-TAK):** `TURN_URL=turn:<ip>:<port>`, `TURN_USERNAME`, `TURN_CREDENTIAL`. Portal Configuration then shows TURN as "configured in server environment" and can't edit it. When infra-TAK rotates the credential, rewriting `.env` and recreating the server container keeps remote view working.
+2. **Portal Configuration → TURN**, stored in `data/portal-settings.json`. infra-TAK v10.2.29-alpha shows the values on its Remote Assist page but doesn't write them into the portal itself, so an operator copies them across. After a rotation, they have to be copied again.
+
+The portal sends **one ICE list** (STUN plus TURN) to both the admin browser and the device (`iceServers` in `START_REMOTE_ADMIN`). Before 3.2.0 the TURN server didn't reach either side; see [PLATFORM_REFERENCE.md](PLATFORM_REFERENCE.md) §6.
+
+- Never assume port 3478. Read the TURN host and port from configuration.
+- Don't rely on TCP relay.
+
+### Notice for infra-TAK maintainers: Remote Assist 3.2.0
+
+Everything below is **additive**. A box that changes nothing behaves as before, except that TURN now works.
+
+| Change | Effect on infra-TAK |
+|---|---|
+| New optional env vars: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`, `STUN_URLS`, `MAP_TILE_URL`, `MAP_TILE_ATTRIBUTION`, `GEOCODER_URL`, `GEOCODER_USER_AGENT`, `PHONEDB_ENABLED` | None until you write them. Empty means the built-in default; `none` turns a service off. Writing `TURN_URL`/`TURN_USERNAME`/`TURN_CREDENTIAL` from your CoTURN fields would make credential rotation reach the portal automatically. |
+| `PHONEDB_TLS_INSECURE` compose default `true` → `false` | None. You already write `false`. |
+| `PUT /api/admin/portal-config/server-port` now returns **410**. The device URL comes only from `PUBLIC_BASE_URL`. | None. infra-TAK doesn't call it and already writes `PUBLIC_BASE_URL`. |
+| The browser and device both get the TURN server, with `urls` as an array | Calls may now relay through your CoTURN (UDP 50000–50050) where they used to fail. |
 
 ---
 
@@ -123,7 +168,8 @@ infra-TAK auto-creates:
 
 - **Provider name:** `EUD Remote Assist`
 - **Slug:** `eud-remote-assist`
-- **Client type:** `public` (not confidential)
+- **Client type:** `public` (not confidential), PKCE
+- **Grant types:** `authorization_code`, `refresh_token`
 - **Redirect URIs:**
   - `https://remote.<fqdn>`
   - `https://remote.<fqdn>/`
@@ -137,14 +183,16 @@ The web app does **not** use `client_secret`. Device APIs use `X-Connection-Secr
 
 ## Versioning contract
 
-infra-TAK uses this for update checks:
+infra-TAK decides "update available" like this:
 
 | Signal | Usage |
 |--------|--------|
-| `VERSION` (repo root) | Expected release after `git pull` |
-| `GET /version` on **8448** | Running version post-deploy |
-| `GET /health` on **8448** | Includes `version` field |
-| Git tag `vX.Y.Z` | Release label matching `VERSION` |
+| `VERSION` on `main` (GitHub API, `contents/VERSION?ref=main`) | Newer semver than the local `VERSION` → update available |
+| `main` commit SHA (GitHub API) | Differs from the clone's `HEAD` → update available, even with the same `VERSION` |
+| `GET /version` on loopback (`127.0.0.1:8767`) | Running version, shown on the card |
+| Git tag `vX.Y.Z` | Release label. Should match `VERSION` (CI enforces this). |
+
+So any push to `main` shows up as an update, release or not. Release to `dev` first, and promote to `main` deliberately.
 
 Post-update check:
 
@@ -196,6 +244,17 @@ docker compose up -d --build
 curl -sS http://127.0.0.1:8767/version | jq -r .version
 cat VERSION                     # must match
 ```
+
+---
+
+## What this repo promises infra-TAK
+
+From the infra-TAK maintainers' handover (2026-10-24):
+
+- **No absolute host paths** in `docker-compose.yml`. infra-TAK moves the install between home directories.
+- **New env vars get a default** in `.env.example`, so infra-TAK can merge them on deploy.
+- **Tell infra-TAK ahead of time** about any breaking change to env vars, ports, or Authentik/OIDC expectations. infra-TAK pins and verifies, so it needs the change before a box can pick it up.
+- **Keep runtime dependencies patched** (for example body-parser ≥ 1.20.9). CI runs `npm audit --audit-level=high` on every push.
 
 ---
 

@@ -9,6 +9,33 @@ Notes for app versions before 3.1.4 are in those releases, and in the portal not
 
 ---
 
+## v3.4.0 — 2026-10-26
+
+- **The device locator rings through silent mode and Do Not Disturb.** A ping now plays at full alarm volume even when the phone is silenced. Before, a phone in Do Not Disturb stayed silent, and a silenced phone played only at the quietest alarm level. Afterwards your volume and Do Not Disturb settings are put back exactly as they were.
+- **One exception, set by Android:** on Android 15 and later, a phone in Do Not Disturb **"Total silence"** can't be rung, because Android no longer lets apps override it. Android's usual Do Not Disturb setting allows alarms, so the locator still rings in that mode.
+- **New permission control: Do Not Disturb Access.** Tap it once and allow EUD Remote Assist in the screen that opens. It's required to register, like the other controls. Devices already registered keep working, but show it as missing until it's allowed.
+- **Smaller download:** the app is about half its previous size (it no longer includes code that only emulators use).
+
+## v3.3.0 — 2026-10-26
+
+- **The app tells you when your console has a newer version.** When the EUD Remote Assist console (portal 3.3.0 or later) hosts a newer build, the app shows **Update available** with a **Download update** button. The download comes from your own console, not the internet. Android then asks you to install it. Devices managed by MDM can keep updating through MDM as before.
+
+## v3.2.1 — 2026-10-25
+
+- **The device registers as soon as its setup is complete.** If the app was opened before every permission was granted (for example, Remote Control was turned on afterwards in Settings), it used to stay "Not Registered" until someone tapped Refresh Connection. It now registers by itself when you return to the app with everything granted.
+
+## v3.2.0 — 2026-10-25
+
+**Requires Android 11 or later.** Devices on Android 8–10 can no longer install or update the app.
+
+- **Remote assist starts on its own on Android 14 and later.** Android 14 hid the "Start now" button of the screen-recording prompt from the app, so a remote-assist session stopped at that prompt until someone on the device tapped it. The app can now accept it as intended on managed devices. Tested on the Android 11–16 emulators.
+- **The correct app version is reported to the portal.** The app had been reporting itself as 2.0.8 regardless of its real version, which made the portal show "Newer application version available".
+- **Screens fit Android 15 and 16.** Content no longer slides under the status bar, and the status and navigation bar icons stay readable.
+- **Fewer permissions.** Storage and photo/video/audio access were removed; the app never used them.
+- The camera and phone hardware are now optional, so tablets without them aren't excluded.
+
+**Good to know:** if someone uses Android's **Force stop** on this app, Android also turns off its Remote Control (accessibility) setting. Turn it back on in the app's Permission Controls before the next remote session.
+
 ## v3.1.4 — 2026-07-20
 
 - **MDM Override**: Added the ability to instantly bypass the MDM configuration during "Scan to Enroll" if the correct MDM settings password is provided.

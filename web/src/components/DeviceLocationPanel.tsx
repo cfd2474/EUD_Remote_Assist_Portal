@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { User } from "oidc-client-ts";
 import { fetchReverseGeocode } from "../api/client";
 import { DeviceMap } from "./DeviceMap";
+import { useClientConfig } from "../config/clientConfig";
 
 interface DeviceLocationPanelProps {
   uid: string;
@@ -24,8 +25,15 @@ export function DeviceLocationPanel({
   const [address, setAddress] = useState<string | null>(null);
   const [addressLoading, setAddressLoading] = useState(true);
   const [addressError, setAddressError] = useState(false);
+  const { config } = useClientConfig();
+  // Until settings load, assume lookup is on; the server answers 404 if it is off.
+  const geocoderEnabled = config?.geocoderEnabled ?? true;
 
   useEffect(() => {
+    if (!geocoderEnabled) {
+      setAddressLoading(false);
+      return;
+    }
     let cancelled = false;
     setAddressLoading(true);
     setAddressError(false);
@@ -51,7 +59,7 @@ export function DeviceLocationPanel({
     return () => {
       cancelled = true;
     };
-  }, [user, lat, lon]);
+  }, [user, lat, lon, geocoderEnabled]);
 
   return (
     <>
@@ -59,7 +67,9 @@ export function DeviceLocationPanel({
         <div>
           <dt>Address</dt>
           <dd>
-            {addressLoading
+            {!geocoderEnabled
+              ? "Address lookup is turned off"
+              : addressLoading
               ? "Looking up address…"
               : addressError
                 ? "Address unavailable"

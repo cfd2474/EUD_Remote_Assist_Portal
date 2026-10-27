@@ -1,6 +1,6 @@
 # EUD Remote Assist Portal — Administrator Guide
 
-**Release 3.1.3**
+**Release 3.4.0**
 
 The Remote Assist Portal is the web console for managing your fleet of company-owned Android devices. From a single browser you can see where every device is, confirm it's online, push a ping or location request, and take live control of the screen for hands-on support.
 
@@ -28,6 +28,14 @@ The **Enrollment** page is where you generate secure tokens to onboard new devic
 - **MDM Tokens**: Best for automated fleet rollouts. Generates a permanent JSON configuration block that you can copy directly into your MDM platform's managed app restrictions.
 
 The active tokens table displays the remaining uses or time for each token. Once a token is fully consumed or expires, it is automatically marked inactive and can be safely removed. You can also manually revoke a token at any time.
+
+QR codes and MDM configs point devices at the **Device API URL** shown under **Portal Configuration**. That URL comes from the server's settings. If it isn't set, the portal shows a message instead of a QR code.
+
+### Portal Configuration
+
+- **GitHub APK access**: an optional token for faster, unthrottled APK version checks.
+- **Device API URL**: where devices enroll and connect. It's read-only here; your server administrator sets it (`PUBLIC_BASE_URL`). A warning appears if a port saved on this page by an older version doesn't match it.
+- **TURN Server**: relays remote-view video when the device and your browser can't reach each other directly. Both your browser and the device use it. If the server administrator has set it in the server's settings, it shows as configured there and can't be edited on this page.
 
 ---
 
@@ -74,14 +82,20 @@ The device info list displays specific metadata elements. The **Device Name** is
 ### Ping
 Sends `TRIGGER_PING`. The device alerts so the user (or you, if it's nearby) can find it. The device replies with a `PING_ACKNOWLEDGED` event once the user responds.
 
+With app 3.4.0 or later, the device keeps ringing at full alarm volume until someone acknowledges it or it times out after 2 minutes. It rings even when the phone is on silent or vibrate, or in Do Not Disturb set to "alarms only" or "priority". Afterwards it puts the volume and Do Not Disturb back exactly as they were.
+
+The device needs **Do Not Disturb Access**, one of the app's Permission Controls. The one exception: on **Android 15 and later**, a phone the user has put in Do Not Disturb **"Total silence"** can't be rung. Android no longer lets any app override that setting. On Android 11–14 it rings through Total silence as well.
+
 ### Locate
 Sends `REQUEST_LOCATION` for an immediate position fix rather than waiting for the next scheduled pulse. Useful when a device just moved or hasn't checked in recently.
 
 ### Remote Assist (screen view + control)
-1. Click **Start Remote Assist**. This sends `START_REMOTE_ADMIN`.
+1. Click **Connect**. This sends `START_REMOTE_ADMIN`.
 2. The device begins streaming its screen to your browser over WebRTC. If a constrained network is detected, it will dynamically adjust or prevent WebRTC.
 3. Click or tap on the streamed image to drive the device — each interaction is sent as a touch packet (`CLICK` with x/y as a percentage of the screen, so it works across any resolution).
-4. Click **Stop Remote Assist** (`STOP_REMOTE_ADMIN`) when finished. Always stop the session when you're done so the device isn't left in a controllable state.
+4. Click **Disconnect** (`STOP_REMOTE_ADMIN`) when finished. This ends the session for everyone watching the device. Always disconnect when you're done, so the device isn't left in a controllable state.
+
+**Several admins can watch the same session.** Closing your tab or navigating away doesn't end it for the others. When the **last** viewer leaves, the portal ends the session automatically after about 15 seconds. Reloading the page within that time keeps the session. If your connection to the portal drops, the page reconnects on its own.
 
 ### Remove device
 Deletes the device record and **all associated data** from the server. This does not wipe the device — it only removes it from the portal. The device would need to re-register to reappear.
@@ -94,6 +108,17 @@ Commands reach devices two ways:
 
 - **Instant (WebSocket):** When a device holds an open `wss://.../ws/device` connection, ping/locate/remote-assist commands fire immediately. This is the normal, expected state.
 - **Queued (fallback):** If the WebSocket is down, commands are held and delivered on the device's next telemetry POST or command poll — so they may lag by up to one tracking interval.
+
+Queued commands **expire** if the device doesn't collect them in time, so a device that comes back late never acts on a stale request:
+
+| Command | Expires after |
+|---|---|
+| Start remote assist, remote unlock | 2 minutes |
+| Stop remote assist, ping | 10 minutes |
+| Locate | 1 hour |
+| Lock, resync device info | 24 hours |
+
+An expired command is dropped without running. Send it again once the device is back online. A device isn't shown as being in a remote-assist session until it has actually received the start command.
 
 If an action seems slow or unresponsive, the most common cause is that the device's WebSocket isn't connected (poor signal, app backgrounded/killed, or network blocking `wss`).
 
@@ -119,4 +144,4 @@ If an action seems slow or unresponsive, the most common cause is that the devic
 
 ---
 
-*EUD Remote Assist Portal · TAK-Solutions · mike@tak-solutions.com*
+*EUD Remote Assist Portal · TAK-Solutions*

@@ -8,12 +8,16 @@ import { config } from "./config.js";
 import { SERVICE_NAME, VERSION } from "./version.js";
 import { deviceApiRouter } from "./routes/deviceApi.js";
 import { adminApiRouter } from "./routes/adminApi.js";
+import { appDownloadRouter } from "./routes/appDownload.js";
 import { attachWebSocketHandlers } from "./ws/handlers.js";
 import { resetLiveSessionFlags, purgeOldLocationHistory } from "./services/devices.js";
-import {
-  getEffectiveGithubToken,
-  loadPortalSettings,
-} from "./services/portalSettings.js";
+import { purgeExpiredCommands } from "./services/commands.js";
+import { getSignalingStatus, pruneIdleSessions } from "./services/signalingSession.js";
+import { startViewerPresencePolicy } from "./services/viewerPresence.js";
+import { dispatchCommand } from "./services/commandDispatch.js";
+import { hub } from "./ws/hub.js";
+import { loadPortalSettings } from "./services/portalSettings.js";
+import { seedAppBuilds } from "./services/appBuildSeeder.js";
 
 const app = express();
 
@@ -63,6 +67,7 @@ app.get("/version", (_req, res) => {
   res.json({ version: VERSION, service: SERVICE_NAME });
 });
 
+app.use("/api/v1", deviceLimiter, appDownloadRouter);
 app.use("/api/v1", deviceLimiter, deviceApiRouter);
 app.use("/api/admin", adminApiRouter);
 
@@ -70,6 +75,14 @@ const server = http.createServer(app);
 
 const deviceWss = new WebSocketServer({ noServer: true });
 const adminWss = new WebSocketServer({ noServer: true });
+
+// D8: the remote session ends when the last admin viewer leaves (after a reload grace).
+startViewerPresencePolicy({
+  onViewerCountChange: (listener) => hub.onViewerCountChange(listener),
+  viewerCount: (uid) => hub.viewerCount(uid),
+  isRemoteActive: (uid) => getSignalingStatus(uid).remoteActive,
+  stopSession: (uid) => dispatchCommand(uid, "STOP_REMOTE_ADMIN"),
+});
 
 attachWebSocketHandlers(deviceWss, "/ws/device");
 attachWebSocketHandlers(adminWss, "/ws/admin");
@@ -94,9 +107,11 @@ server.on("upgrade", (req, socket, head) => {
   socket.destroy();
 });
 
-const LOCATION_HISTORY_PURGE_MS = 24 * 60 * 60 * 1000;
+const DAILY_MAINTENANCE_MS = 24 * 60 * 60 * 1000;
+const SIGNALING_PRUNE_MS = 10 * 60 * 1000;
 
-async function runLocationHistoryPurge(): Promise<void> {
+/** Daily: drop location history past retention and queued commands past their TTL. */
+async function runDailyMaintenance(): Promise<void> {
   try {
     const deleted = await purgeOldLocationHistory();
     if (deleted > 0) {
@@ -107,21 +122,35 @@ async function runLocationHistoryPurge(): Promise<void> {
   } catch (err) {
     console.error("Location history purge failed:", err);
   }
+
+  try {
+    const expired = await purgeExpiredCommands();
+    if (expired > 0) {
+      console.log(`Purged ${expired} queued command(s) past their delivery TTL`);
+    }
+  } catch (err) {
+    console.error("Queued command purge failed:", err);
+  }
+}
+
+function runSignalingPrune(): void {
+  const pruned = pruneIdleSessions();
+  if (pruned > 0) {
+    console.log(`Pruned ${pruned} idle signaling session(s)`);
+  }
 }
 
 void resetLiveSessionFlags().then(async () => {
   await loadPortalSettings();
-  await runLocationHistoryPurge();
-  setInterval(runLocationHistoryPurge, LOCATION_HISTORY_PURGE_MS);
+  // Import the APK that ships with this release (dist/). A failure must not keep the portal down.
+  await seedAppBuilds().catch((err) => console.error("App build import failed:", err));
+  await runDailyMaintenance();
+  setInterval(runDailyMaintenance, DAILY_MAINTENANCE_MS);
+  setInterval(runSignalingPrune, SIGNALING_PRUNE_MS);
 
   server.listen(config.port, () => {
     console.log(
       `EUD Remote Assist Portal v${VERSION} listening on port ${config.port}`
     );
-    if (!getEffectiveGithubToken()) {
-      console.warn(
-        "No GitHub token configured — APK lookups use standard unauthenticated GitHub API access. Add a token under Portal Configuration for unthrottled repo access."
-      );
-    }
   });
 });

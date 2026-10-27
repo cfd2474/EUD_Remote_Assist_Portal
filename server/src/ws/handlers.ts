@@ -3,18 +3,16 @@ import { WebSocketServer, WebSocket } from "ws";
 import { pool } from "../db/pool.js";
 import type { DeviceRow } from "../types.js";
 import { hub } from "./hub.js";
-import { config } from "../config.js";
-import { drainCommands } from "../services/commands.js";
+import { verifyAdminToken } from "../auth/oidc.js";
+import { deliverQueuedCommands } from "../services/commandDispatch.js";
+import { appUpdateOffer, getCurrentAppBuild } from "../services/appBuilds.js";
 import bcrypt from "bcrypt";
 import {
   isSignalingMessage,
   describeSignaling,
   SIGNALING_HINT_PAYLOAD,
 } from "../services/signalingNormalize.js";
-import {
-  recordUnrecognizedDeviceMessage,
-  setRemoteSessionActive,
-} from "../services/signalingSession.js";
+import { recordUnrecognizedDeviceMessage } from "../services/signalingSession.js";
 import type { ControlPacket } from "../types.js";
 
 interface DeviceAuthMessage {
@@ -46,43 +44,16 @@ async function verifyDevice(uid: string, secret: string): Promise<DeviceRow | nu
   return match ? row : null;
 }
 
-async function verifyAdminToken(token: string): Promise<boolean> {
-  try {
-    const { createRemoteJWKSet, jwtVerify } = await import("jose");
-    const jwks = createRemoteJWKSet(new URL(config.oidc.jwksUri));
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: config.oidc.issuer,
-      ...(config.oidc.audience ? { audience: config.oidc.audience } : {}),
-    });
+async function isValidAdminToken(token: string): Promise<boolean> {
+  const result = await verifyAdminToken(token);
+  if (result.ok) return true;
 
-    const adminUser = payload as any;
-    let authorized = false;
-    
-    // Check Email
-    if (config.oidc.adminEmails && adminUser.email) {
-      if (config.oidc.adminEmails.includes(adminUser.email.toLowerCase())) {
-        authorized = true;
-      }
-    }
-    
-    // Check Groups
-    if (!authorized && config.oidc.adminGroup) {
-      const groups = (payload.groups as string[]) || [];
-      if (groups.includes(config.oidc.adminGroup)) {
-        authorized = true;
-      }
-    }
-
-    if (!authorized) {
-      console.warn(`WebSocket admin token rejected: Account is not authorized (email=${adminUser.email})`);
-      return false;
-    }
-
-    return true;
-  } catch (err) {
-    console.error("Admin WebSocket token verification failed:", err);
-    return false;
+  if (result.reason === "forbidden") {
+    console.warn(`WebSocket admin token rejected: Account is not authorized (email=${result.user?.email})`);
+  } else {
+    console.warn("WebSocket admin token rejected: invalid or expired token");
   }
+  return false;
 }
 
 function isDeviceEvent(message: Record<string, unknown>): boolean {
@@ -96,6 +67,10 @@ export function attachWebSocketHandlers(
 ): void {
   wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
     let authenticated = false;
+    // Auth is async (DB lookup + bcrypt/JWKS). ws doesn't wait for one message handler before
+    // running the next, so a message sent right after auth (e.g. a keepalive) used to be judged
+    // "not auth" and closed the socket with 4003. Messages arriving mid-auth wait for it instead.
+    let authInFlight: Promise<void> | null = null;
     const authTimeout = setTimeout(() => {
       if (!authenticated) {
         ws.close(4001, "Authentication timeout");
@@ -111,63 +86,82 @@ export function attachWebSocketHandlers(
         return;
       }
 
+      if (!authenticated && authInFlight) {
+        await authInFlight;
+        if (!authenticated) return; // auth failed; the socket is closing
+      }
+
       if (!authenticated) {
-        if (path === "/ws/device") {
-          const auth = message as unknown as DeviceAuthMessage;
-          if (auth.type !== "auth" || !auth.uid || !auth.connection_secret) {
-            ws.close(4003, "Device auth required");
-            return;
-          }
-
-          const device = await verifyDevice(auth.uid, auth.connection_secret);
-          if (!device) {
-            ws.close(4003, "Invalid credentials");
-            return;
-          }
-
-          console.log(`Device WebSocket connected: uid=${auth.uid} ip=${req.socket.remoteAddress}`);
-          authenticated = true;
-          clearTimeout(authTimeout);
-          hub.registerDevice(ws, auth.uid, auth.connection_secret);
-          ws.send(JSON.stringify({ type: "auth_ok", uid: auth.uid }));
-
-          const pending = await drainCommands(auth.uid);
-          for (const command of pending) {
-            ws.send(JSON.stringify(command));
-            if (command.command === "START_REMOTE_ADMIN") {
-              setRemoteSessionActive(auth.uid, true);
-              hub.sendSignalingHint(auth.uid);
-            }
-          }
-          if (pending.length > 0) {
-            console.log(`WebSocket delivered ${pending.length} queued command(s) to uid=${auth.uid}`);
-          }
+        // A keepalive can race the auth message on a fresh socket (the Android app reconnects
+        // right after registering). Answer it rather than dropping the connection; the 10 s
+        // auth timeout above still applies, and any other non-auth message still closes it.
+        if (message.type === "ping") {
+          ws.send(JSON.stringify({ type: "pong" }));
           return;
         }
 
-        if (path === "/ws/admin") {
-          const auth = message as unknown as AdminAuthMessage;
-          if (
-            auth.type !== "auth" ||
-            auth.role !== "admin" ||
-            !auth.token ||
-            !auth.uid
-          ) {
-            ws.close(4003, "Admin auth required");
+        let releaseAuth: () => void = () => {};
+        authInFlight = new Promise<void>((resolve) => {
+          releaseAuth = resolve;
+        });
+        try {
+          if (path === "/ws/device") {
+            const auth = message as unknown as DeviceAuthMessage;
+            if (auth.type !== "auth" || !auth.uid || !auth.connection_secret) {
+              ws.close(4003, "Device auth required");
+              return;
+            }
+
+            const device = await verifyDevice(auth.uid, auth.connection_secret);
+            if (!device) {
+              ws.close(4003, "Invalid credentials");
+              return;
+            }
+
+            console.log(`Device WebSocket connected: uid=${auth.uid} ip=${req.socket.remoteAddress}`);
+            authenticated = true;
+            clearTimeout(authTimeout);
+            hub.registerDevice(ws, auth.uid, auth.connection_secret);
+            // app_update: the console's app build, when the device reports an older version.
+            const appUpdate = appUpdateOffer(getCurrentAppBuild(), device.app_version);
+            ws.send(JSON.stringify({ type: "auth_ok", uid: auth.uid, ...(appUpdate ? { app_update: appUpdate } : {}) }));
+
+            const pending = await deliverQueuedCommands(auth.uid, (command) =>
+              ws.send(JSON.stringify(command))
+            );
+            if (pending.length > 0) {
+              console.log(`WebSocket delivered ${pending.length} queued command(s) to uid=${auth.uid}`);
+            }
             return;
           }
 
-          const valid = await verifyAdminToken(auth.token);
-          if (!valid) {
-            ws.close(4003, "Invalid token");
+          if (path === "/ws/admin") {
+            const auth = message as unknown as AdminAuthMessage;
+            if (
+              auth.type !== "auth" ||
+              auth.role !== "admin" ||
+              !auth.token ||
+              !auth.uid
+            ) {
+              ws.close(4003, "Admin auth required");
+              return;
+            }
+
+            const valid = await isValidAdminToken(auth.token);
+            if (!valid) {
+              ws.close(4003, "Invalid token");
+              return;
+            }
+
+            authenticated = true;
+            clearTimeout(authTimeout);
+            hub.registerAdmin(ws, auth.token.slice(0, 16), auth.uid);
+            ws.send(JSON.stringify({ type: "auth_ok", uid: auth.uid }));
             return;
           }
-
-          authenticated = true;
-          clearTimeout(authTimeout);
-          hub.registerAdmin(ws, auth.token.slice(0, 16), auth.uid);
-          ws.send(JSON.stringify({ type: "auth_ok", uid: auth.uid }));
-          return;
+        } finally {
+          releaseAuth();
+          authInFlight = null;
         }
       }
 

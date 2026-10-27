@@ -1,20 +1,20 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "react-oidc-context";
 import {
-  applyPortalGithubToken,
-  clearPortalGithubToken,
+  fetchLatestApk,
   fetchPortalConfig,
-  applyPortalServerPort,
   applyPortalTurnSettings,
   clearPortalTurnSettings,
 } from "../api/client";
-import type { PortalGithubConfig } from "../types";
+import type { LatestApkRelease, PortalConfig } from "../types";
+
+const shortHash = (hash: string) => `${hash.slice(0, 12)}…${hash.slice(-6)}`;
 
 export function PortalConfiguration() {
   const auth = useAuth();
-  const [config, setConfig] = useState<PortalGithubConfig | null>(null);
-  const [token, setToken] = useState("");
-  const [serverPort, setServerPort] = useState("8448");
+  const [config, setConfig] = useState<PortalConfig | null>(null);
+  const [appBuild, setAppBuild] = useState<LatestApkRelease | null>(null);
+  const [appBuildError, setAppBuildError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -36,8 +36,14 @@ export function PortalConfiguration() {
     try {
       const data = await fetchPortalConfig(auth.user);
       setConfig(data);
-      setServerPort(data.serverPort.toString());
       setTurnUrl(data.turnServerUrl || "");
+      try {
+        setAppBuild(await fetchLatestApk(auth.user));
+        setAppBuildError(null);
+      } catch (err) {
+        setAppBuild(null);
+        setAppBuildError(err instanceof Error ? err.message : "Failed to load the app build");
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to load portal configuration"
@@ -50,76 +56,6 @@ export function PortalConfiguration() {
   useEffect(() => {
     void loadConfig();
   }, [auth.user]);
-
-  const handleApply = async () => {
-    if (!auth.user || !token.trim()) {
-      return;
-    }
-
-    setApplying(true);
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      const data = await applyPortalGithubToken(auth.user, token.trim());
-      setConfig(data);
-      setToken("");
-      setSuccessMessage(
-        "GitHub token applied. APK version checks now use unthrottled repo access."
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to apply GitHub token");
-    } finally {
-      setApplying(false);
-    }
-  };
-
-  const handleApplyPort = async () => {
-    if (!auth.user) return;
-
-    const portNum = parseInt(serverPort, 10);
-    if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
-      setError("Please enter a valid port number (1-65535)");
-      return;
-    }
-
-    setApplying(true);
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      const data = await applyPortalServerPort(auth.user, portNum);
-      setConfig(data);
-      setSuccessMessage("Server port successfully updated.");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to apply Server Port");
-    } finally {
-      setApplying(false);
-    }
-  };
-
-  const handleClear = async () => {
-    if (!auth.user) {
-      return;
-    }
-
-    setClearing(true);
-    setError(null);
-    setSuccessMessage(null);
-
-    try {
-      const data = await clearPortalGithubToken(auth.user);
-      setConfig(data);
-      setToken("");
-      setSuccessMessage(
-        "GitHub token removed. The portal will use standard unauthenticated GitHub lookup."
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to clear GitHub token");
-    } finally {
-      setClearing(false);
-    }
-  };
 
   const handleApplyTurn = async () => {
     if (!auth.user || !turnUrl.trim()) return;
@@ -153,7 +89,7 @@ export function PortalConfiguration() {
       setTurnUrl("");
       setTurnUsername("");
       setTurnCredential("");
-      setSuccessMessage("TURN server settings removed. Devices will use standard STUN.");
+      setSuccessMessage("TURN server settings removed. Remote view now uses STUN only.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear TURN settings");
     } finally {
@@ -161,8 +97,7 @@ export function PortalConfiguration() {
     }
   };
 
-  const envManaged = config?.tokenSource === "environment";
-  const portalManaged = config?.tokenSource === "portal";
+  const turnEnvManaged = config?.turnSource === "environment";
 
   return (
     <div className="page portal-configuration-page">
@@ -177,88 +112,36 @@ export function PortalConfiguration() {
 
       {config ? (
         <section className="panel portal-config-panel">
-          <h2>GitHub APK access</h2>
+          <h2>App build</h2>
           <p className="portal-config-intro">
-            The Download page and device app-version checks read release metadata
-            from <strong>{config.apkRepo}</strong>. By default the portal uses
-            standard unauthenticated GitHub lookup. Adding a personal access token
-            gives this server <strong>unthrottled access to the GitHub repo</strong>{" "}
-            and improves reliability when checking for the latest APK.
+            This console hosts the EUD Remote Assist app itself. The APK ships with each portal
+            release (in <code>dist/</code>) and is imported when the server starts, so the
+            Download page and device update checks never contact GitHub. Devices on an older
+            version are offered this build.
           </p>
-
-          <div className="portal-config-status">
-            {config.tokenConfigured ? (
-              <span className="badge badge-online">
-                {envManaged
-                  ? "Token configured in server environment (.env)"
-                  : "GitHub token active"}
-              </span>
-            ) : (
-              <span className="badge badge-offline">Using standard lookup (no token)</span>
-            )}
-          </div>
-
-          <div className="portal-config-instructions">
-            <h3>Create a classic GitHub token</h3>
-            <ol>
-              <li>
-                Sign in to GitHub and open <strong>Settings</strong> →{" "}
-                <strong>Developer settings</strong> →{" "}
-                <strong>Personal access tokens</strong> →{" "}
-                <strong>Tokens (classic)</strong>.
-              </li>
-              <li>Choose <strong>Generate new token (classic)</strong>.</li>
-              <li>
-                Select the <strong>public_repo</strong> scope (read access to public
-                repositories).
-              </li>
-              <li>Generate the token and copy the value (shown once).</li>
-              <li>Paste it below and click <strong>Apply</strong>.</li>
-            </ol>
-            <p className="portal-config-note">
-              Use a token created on <em>this</em> server&apos;s GitHub account.
-              Do not share tokens between installations.
-            </p>
-          </div>
-
-          {envManaged ? (
-            <p className="portal-config-env-note">
-              A GitHub token is already set via <code>GITHUB_TOKEN</code> in the
-              server <code>.env</code> file. Remove it there to manage the token
-              from this page instead.
-            </p>
-          ) : (
-            <div className="portal-config-form">
-              <label className="filter-field portal-config-token-field">
-                <span>GitHub classic token (public_repo)</span>
-                <input
-                  type="password"
-                  value={token}
-                  onChange={(event) => setToken(event.target.value)}
-                  placeholder="ghp_xxxxxxxx"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-              </label>
-              <div className="portal-config-actions">
-                <button
-                  type="button"
-                  className="btn-primary"
-                  disabled={applying || !token.trim()}
-                  onClick={() => void handleApply()}
-                >
-                  {applying ? "Applying…" : "Apply"}
-                </button>
-                {portalManaged ? (
-                  <button
-                    type="button"
-                    disabled={clearing}
-                    onClick={() => void handleClear()}
-                  >
-                    {clearing ? "Removing…" : "Remove token"}
-                  </button>
-                ) : null}
+          {appBuild ? (
+            <>
+              <div className="portal-config-status">
+                <span className="badge badge-online">
+                  Version {appBuild.version} (versionCode {appBuild.versionCode})
+                </span>
               </div>
+              <dl className="portal-config-details">
+                <dt>Download</dt>
+                <dd><code>{appBuild.downloadUrl}</code></dd>
+                <dt>File SHA-256</dt>
+                <dd><code title={appBuild.sha256}>{shortHash(appBuild.sha256)}</code></dd>
+                <dt>Signing certificate SHA-256</dt>
+                <dd><code title={appBuild.signerSha256}>{shortHash(appBuild.signerSha256)}</code></dd>
+                <dt>Size</dt>
+                <dd>{(appBuild.size / (1024 * 1024)).toFixed(1)} MB</dd>
+                <dt>Imported</dt>
+                <dd>{new Date(appBuild.importedAt).toLocaleString()}</dd>
+              </dl>
+            </>
+          ) : (
+            <div className="portal-config-status">
+              <span className="badge badge-offline">{appBuildError ?? "No app build"}</span>
             </div>
           )}
         </section>
@@ -266,56 +149,58 @@ export function PortalConfiguration() {
 
       {config ? (
         <section className="panel portal-config-panel" style={{ marginTop: "2rem" }}>
-          <h2>Tracking Server Port</h2>
+          <h2>Device API URL</h2>
           <p className="portal-config-intro">
-            Set the port used by the device tracking server. The QR builder will automatically
-            reference this port when building the configuration URL for new devices.
+            Devices enroll and connect to this address. Enrollment QR codes and MDM configs use it,
+            and so does the server's registration response. It comes from{" "}
+            <code>PUBLIC_BASE_URL</code> in the server <code>.env</code> file; change it there and
+            restart the stack.
           </p>
-          <div className="portal-config-form">
-            <label className="filter-field portal-config-token-field">
-              <span>Server Port</span>
-              <input
-                type="number"
-                value={serverPort}
-                onChange={(event) => setServerPort(event.target.value)}
-                placeholder="8448"
-                min="1"
-                max="65535"
-              />
-            </label>
-            <div className="portal-config-actions">
-              <button
-                type="button"
-                className="btn-primary"
-                disabled={applying || !serverPort}
-                onClick={() => void handleApplyPort()}
-              >
-                {applying ? "Saving…" : "Save Port"}
-              </button>
-            </div>
+          <div className="portal-config-status">
+            {config.publicBaseUrl ? (
+              <span className="badge badge-online">{config.publicBaseUrl}</span>
+            ) : (
+              <span className="badge badge-offline">Not set: enrollment QR codes are unavailable</span>
+            )}
           </div>
+          {config.serverPortMismatch ? (
+            <p className="portal-config-env-note">
+              A Server Port of <strong>{config.legacyServerPort}</strong> was saved on this page
+              before version 3.2.0, but <code>PUBLIC_BASE_URL</code> uses port{" "}
+              <strong>{config.devicePort ?? "unknown"}</strong>. QR codes now follow{" "}
+              <code>PUBLIC_BASE_URL</code>. If devices should use port {config.legacyServerPort},
+              put it in <code>PUBLIC_BASE_URL</code>.
+            </p>
+          ) : null}
         </section>
       ) : null}
 
       {config ? (
         <section className="panel portal-config-panel" style={{ marginTop: "2rem" }}>
-          <h2>Alternate TURN/STUN Server</h2>
+          <h2>TURN Server</h2>
           <p className="portal-config-intro">
-            Define a custom TURN or STUN server to be used by Android devices when establishing
-            the WebRTC connection. This is required if the device is on a network that blocks standard
-            WebRTC traffic.
+            A TURN server relays remote-view video when the device and this browser cannot reach
+            each other directly (strict NAT, firewalls). Both the admin browser and the device use
+            it. URL format: <code>turn:host:port</code> (infra-TAK&apos;s CoTURN listens on 3479).
           </p>
 
           <div className="portal-config-status">
             {config.turnServerUrl ? (
               <span className="badge badge-online">
-                Active: {config.turnServerUrl} {config.turnCredentialConfigured ? "(Authenticated)" : ""}
+                {turnEnvManaged ? "Configured in server environment: " : "Active: "}
+                {config.turnServerUrl} {config.turnCredentialConfigured ? "(Authenticated)" : ""}
               </span>
             ) : (
-              <span className="badge badge-offline">Using default STUN server (stun.l.google.com:19302)</span>
+              <span className="badge badge-offline">No TURN server: remote view uses STUN only</span>
             )}
           </div>
 
+          {turnEnvManaged ? (
+            <p className="portal-config-env-note">
+              TURN is set by <code>TURN_URL</code> in the server <code>.env</code> file. Change it
+              there, or remove it to manage TURN from this page instead.
+            </p>
+          ) : (
           <div className="portal-config-form">
             <label className="filter-field portal-config-token-field">
               <span>Server URL</span>
@@ -370,6 +255,7 @@ export function PortalConfiguration() {
               ) : null}
             </div>
           </div>
+          )}
         </section>
       ) : null}
     </div>

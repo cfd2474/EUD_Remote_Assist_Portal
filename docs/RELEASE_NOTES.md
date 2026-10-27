@@ -1,22 +1,139 @@
 # EUD Remote Assist Portal — Release Notes
 
-Running changelog for the **portal server and admin UI**. Update this file on every version release.
+Running changelog for the **portal server and admin UI**. Update this file on every version release. Android app changes are in the [app release notes](app-release-notes.md).
 
-**Format:** Each release is wrapped in `RELEASE_START` / `RELEASE_END` HTML comments with a `version=` attribute. New entries are added **at the top** (newest first). Automation and the admin portal parse these blocks.
+**Format:** Each release is wrapped in `RELEASE_START` / `RELEASE_END` HTML comments with a `version=` attribute, and its heading is `## vX.Y.Z — YYYY-MM-DD`. New entries are added **at the top** (newest first). Automation and the admin portal parse these blocks.
 
 ---
 
-<!-- RELEASE_START version=3.1.4 -->
-## Version 3.1.4
+<!-- RELEASE_START version=3.4.0 -->
+## v3.4.0 — 2026-10-26
 
-**App**
+**Portal**, with **app 3.4.0** included. Devices on 3.3.0 are offered the update automatically.
 
-- **MDM Override**: Added the ability to instantly bypass the MDM configuration during "Scan to Enroll" if the correct MDM settings password is provided.
+- **Ping now rings through silent mode and Do Not Disturb.** A pinged device keeps ringing at full alarm volume until someone acknowledges it, even when it's on silent or vibrate, or in Do Not Disturb set to "alarms only" or "priority". Its volume and Do Not Disturb settings are put back afterwards. Devices need the new **Do Not Disturb Access** permission control in the app.
+- **One exception, set by Android:** on Android 15 and later, a device the user has put in Do Not Disturb **"Total silence"** can't be rung. Android no longer allows any app to override that mode. See the Administrator Guide, under Ping.
+- **The app download is half the size** (about 35 MB instead of 72 MB).
 
-<!-- RELEASE_END version=3.1.4 -->
+**Upgrading:** no configuration changes. Devices already registered keep working. Their Permission Controls show **Do Not Disturb Access** as missing until it's allowed on the device; new registrations need it.
+<!-- RELEASE_END version=3.4.0 -->
+
+<!-- RELEASE_START version=3.3.0 -->
+## v3.3.0 — 2026-10-26
+
+**Portal**, with **app 3.3.0** included.
+
+- **The console hosts the EUD Remote Assist app itself.** Each portal release now ships with the matching app. The Download page, its QR code and the "Newer application version available" badge all use the copy on your console. Neither the server nor your devices contact GitHub for the app, and the GitHub token setting is gone.
+- **Devices are told when the console has a newer app.** App 3.3.0 shows **Update available** with a **Download update** button that downloads from your console, and Android then asks to install it. Devices managed by MDM can keep updating through MDM.
+- **Portal Configuration → App build** shows the hosted app version and its checksums.
+- The console checks the app before offering it. It accepts only the EUD Remote Assist app signed with the release certificate, and never offers an older version than it already has.
+
+**Upgrading from 3.2.x:**
+- No configuration changes are needed.
+- `GITHUB_APK_REPO` and `GITHUB_TOKEN` are no longer used and can stay in `.env`.
+- A GitHub token saved in Portal Configuration is deleted automatically.
+- The update download is larger (about 76 MB), because it now includes the app.
+<!-- RELEASE_END version=3.3.0 -->
+
+<!-- RELEASE_START version=3.2.5 -->
+## v3.2.5 — 2026-10-25
+
+**Portal** (no configuration changes)
+
+- **Documentation links point to their new homes.** The Android app's release notes are now published with the portal as [app release notes](app-release-notes.md). The guides no longer carry a personal contact address.
+<!-- RELEASE_END version=3.2.5 -->
+
+<!-- RELEASE_START version=3.2.4 -->
+## v3.2.4 — 2026-10-25
+
+**Portal** (no configuration changes)
+
+- **Devices no longer drop offline right after connecting.** If a device sent anything in the moment after signing in to the portal (for example its regular keep-alive), the portal could reject the connection. The device then showed as offline until it reconnected on its own, which could take up to 45 seconds. The portal now waits for the sign-in check to finish before handling anything else the device sends.
+
+<!-- RELEASE_END version=3.2.4 -->
+
+<!-- RELEASE_START version=3.2.3 -->
+## v3.2.3 — 2026-10-25
+
+**Portal** (maintenance update, no configuration changes)
+
+- **Behind-the-scenes cleanup of the device page and remote view.** Their code is reorganized into smaller parts that are easier to test and maintain. Nothing changes in how the portal looks or works.
+
+<!-- RELEASE_END version=3.2.3 -->
+
+<!-- RELEASE_START version=3.2.2 -->
+## v3.2.2 — 2026-10-25
+
+**Portal** (no configuration changes)
+
+- **Remote view no longer sometimes sticks at "Connecting".** When the device became ready while the portal's first connection request was still unanswered, the portal sent a second request, and the two answers got crossed. The portal now waits briefly for the first answer.
+- **Leaving the page no longer ends a session that someone else is watching.** The session ends when the last viewer leaves, after about 15 seconds, so reloading the page doesn't cut it off. **Disconnect** still ends it for everyone.
+- **The device page reconnects to the portal by itself** after a network drop or server restart, instead of needing a reload.
+- **Clearer messages.** Remote-view problems are described in plain terms with what to check. Queued commands say how long they stay valid ("expires after 2 minutes").
+
+<!-- RELEASE_END version=3.2.2 -->
+
+<!-- RELEASE_START version=3.2.1 -->
+## v3.2.1 — 2026-10-25
+
+**Portal** (no configuration changes)
+
+- **Queued commands expire.** A command sent while a device is offline is dropped if the device doesn't collect it in time, so it never acts on a stale request. Start remote assist and remote unlock expire after 2 minutes; stop remote assist and ping after 10 minutes; locate after 1 hour; lock and resync after 24 hours. Expired commands are also cleaned from the database daily.
+- **Remote-assist status is accurate for offline devices.** A device is shown as in a remote-assist session only once it has received the start command, not as soon as the command was queued.
+- **Server maintenance.** Command handling now runs through one code path, and memory used for idle remote-view sessions is released. Operators see no other change.
+
+<!-- RELEASE_END version=3.2.1 -->
+
+<!-- RELEASE_START version=3.2.0 -->
+## v3.2.0 — 2026-10-25
+
+**Portal** (no configuration changes required)
+
+- **The TURN server now works for remote view.** Before this release, the TURN server set under Portal Configuration never reached either end of a remote-view session. The admin browser always used a public STUN server, and the device couldn't read the format the portal sent. Both now get the same, correctly formatted list. Remote view should connect in more places, for example when the admin's or device's network blocks direct connections.
+- **TURN can be set in the server's `.env`** (`TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`). When it is, Portal Configuration shows it as managed by the environment.
+- **Enrollment QR codes use the server's device API URL** (`PUBLIC_BASE_URL`), the same address devices are given when they register. The Server Port setting is retired. Portal Configuration now shows the Device API URL read-only, and warns if a port saved there earlier doesn't match.
+- **Outside services can be configured or turned off for closed networks:** STUN, map tiles, device address lookup, and PhoneDB model names. See *External services* in `.env.example`. Map marker icons now ship with the portal instead of loading from the internet.
+- **PhoneDB lookups verify TLS by default.** If model names stop resolving on your host, set `PHONEDB_TLS_INSECURE=true`.
+
+<!-- RELEASE_END version=3.2.0 -->
+
+<!-- RELEASE_START version=3.1.7 -->
+## v3.1.7 — 2026-10-25
+
+**Portal** (documentation update, no configuration changes)
+
+- **Release notes cover the portal only.** Android app changes, starting with the 3.1.4 MDM override, are now in the [app release notes](app-release-notes.md).
+- **Corrected the 3.0.2 entry.** It described a change that was reverted the same day.
+- **Install guides updated.**
+  - Keep the install folder name and `POSTGRES_PASSWORD` unchanged after the first start; changing either leaves the portal with an empty or unreachable database.
+  - Open the TURN port you actually configured (infra-TAK uses 3479) and its UDP relay range.
+
+<!-- RELEASE_END version=3.1.7 -->
+
+<!-- RELEASE_START version=3.1.6 -->
+## v3.1.6 — 2026-10-25
+
+**Portal** (maintenance update, no configuration changes)
+
+- **Release notes show dates.** Each version under Documentation → Release Notes now shows the day it was released.
+- **Automated checks on every change.** The portal's code is now tested automatically before each release, covering device enrollment, admin sign-in, and remote-view signaling. Nothing changes in how the portal works.
+
+<!-- RELEASE_END version=3.1.6 -->
+
+<!-- RELEASE_START version=3.1.5 -->
+## v3.1.5 — 2026-10-25
+
+**Portal** (security update, no configuration changes)
+
+- **Enrollment tokens are counted correctly.** A device that is refused re-enrollment (for example, a wiped phone that was not deleted from the portal first) no longer uses up the token. Several phones scanning the same QR at once can no longer enroll past its use limit.
+- **Security fixes in server components.** Closes the request-body crash advisory (body-parser GHSA-27r3-jxmh-p828) and an IP-spoofing advisory that could affect rate limiting (proxy-addr GHSA-jqcg-44mw-7w3h), plus two lower-severity request-parsing issues.
+- **Security fixes in the admin web app's build tooling** (Vite, React Router).
+- Admin sign-in checks are now shared between the web pages and the live device connection, so both apply exactly the same rules.
+
+<!-- RELEASE_END version=3.1.5 -->
 
 <!-- RELEASE_START version=3.1.3 -->
-## Version 3.1.3
+## v3.1.3 — 2026-07-18
 
 **Portal**
 
@@ -25,7 +142,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=3.1.3 -->
 
 <!-- RELEASE_START version=3.1.2 -->
-## Version 3.1.2
+## v3.1.2 — 2026-07-18
 
 **Portal**
 
@@ -34,7 +151,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=3.1.2 -->
 
 <!-- RELEASE_START version=3.1.1 -->
-## Version 3.1.1
+## v3.1.1 — 2026-06-26
 
 **Portal**
 
@@ -44,7 +161,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=3.1.1 -->
 
 <!-- RELEASE_START version=3.1.0 -->
-## Version 3.1.0
+## v3.1.0 — 2026-06-26
 
 **Portal & App**
 
@@ -56,16 +173,17 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=3.1.0 -->
 
 <!-- RELEASE_START version=3.0.2 -->
-## Version 3.0.2
+## v3.0.2 — 2026-06-21
 
 **Portal**
 
 - Explicitly defined the Docker Compose project name to prevent accidental database wiping when the repository folder is renamed.
+- **Correction:** this change was reverted the same day, before 3.1.0. Docker Compose names the database volume after the project, so pinning the name would have pointed existing installs whose folder had a different name at a new, empty database. The project name again comes from the install folder, so keep that folder name stable.
 
 <!-- RELEASE_END version=3.0.2 -->
 
 <!-- RELEASE_START version=3.0.1 -->
-## Version 3.0.1
+## v3.0.1 — 2026-06-21
 
 **Portal**
 
@@ -75,7 +193,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=3.0.1 -->
 
 <!-- RELEASE_START version=3.0.0 -->
-## Version 3.0.0
+## v3.0.0 — 2026-06-21
 
 **Portal & App**
 
@@ -89,7 +207,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=3.0.0 -->
 
 <!-- RELEASE_START version=2.2.26 -->
-## Version 2.2.26
+## v2.2.26 — 2026-06-17
 
 **Portal**
 
@@ -98,7 +216,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.26 -->
 
 <!-- RELEASE_START version=2.2.25 -->
-## Version 2.2.25
+## v2.2.25 — 2026-06-17
 
 **Portal**
 
@@ -109,7 +227,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.25 -->
 
 <!-- RELEASE_START version=2.2.24 -->
-## Version 2.2.24
+## v2.2.24 — 2026-06-17
 
 **Portal**
 
@@ -118,7 +236,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.24 -->
 
 <!-- RELEASE_START version=2.2.23 -->
-## Version 2.2.23
+## v2.2.23 — 2026-06-17
 
 **Portal**
 
@@ -127,7 +245,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.23 -->
 
 <!-- RELEASE_START version=2.2.22 -->
-## Version 2.2.22
+## v2.2.22 — 2026-06-17
 
 **Portal**
 
@@ -136,7 +254,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.22 -->
 
 <!-- RELEASE_START version=2.2.21 -->
-## Version 2.2.21
+## v2.2.21 — 2026-06-17
 
 **Portal**
 
@@ -145,7 +263,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.21 -->
 
 <!-- RELEASE_START version=2.2.20 -->
-## Version 2.2.20
+## v2.2.20 — 2026-06-16
 
 **Portal**
 
@@ -154,7 +272,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.20 -->
 
 <!-- RELEASE_START version=2.2.19 -->
-## Version 2.2.19
+## v2.2.19 — 2026-06-16
 
 **Portal**
 
@@ -163,7 +281,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.19 -->
 
 <!-- RELEASE_START version=2.2.18 -->
-## Version 2.2.18
+## v2.2.18 — 2026-06-16
 
 **Portal**
 
@@ -172,7 +290,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.18 -->
 
 <!-- RELEASE_START version=2.2.17 -->
-## Version 2.2.17
+## v2.2.17 — 2026-06-16
 
 **Portal**
 
@@ -181,7 +299,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.17 -->
 
 <!-- RELEASE_START version=2.2.16 -->
-## Version 2.2.16
+## v2.2.16 — 2026-06-16
 
 **Portal**
 
@@ -191,7 +309,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.16 -->
 
 <!-- RELEASE_START version=2.2.15 -->
-## Version 2.2.15
+## v2.2.15 — 2026-06-16
 
 **Portal**
 
@@ -201,7 +319,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.15 -->
 
 <!-- RELEASE_START version=2.2.14 -->
-## Version 2.2.14
+## v2.2.14 — 2026-06-16
 
 **Portal**
 
@@ -210,7 +328,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.14 -->
 
 <!-- RELEASE_START version=2.2.13 -->
-## Version 2.2.13
+## v2.2.13 — 2026-06-15
 
 **Portal**
 
@@ -219,13 +337,13 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 **Documentation**
 
-- Expanded [android-app-requirements.md](android-app-requirements.md) with full WebRTC diagnosis, control handling, and rotation requirements for the app team.
-- Corrected WebRTC troubleshooting in [android-webrtc-requirements.md](android-webrtc-requirements.md) based on `chrome://webrtc-internals` evidence.
+- Expanded the Android app integration requirements with full WebRTC diagnosis, control handling, and rotation requirements for the app team.
+- Corrected the Android WebRTC troubleshooting notes based on `chrome://webrtc-internals` evidence.
 
 <!-- RELEASE_END version=2.2.13 -->
 
 <!-- RELEASE_START version=2.2.12 -->
-## Version 2.2.12
+## v2.2.12 — 2026-06-15
 
 **Portal**
 
@@ -234,12 +352,12 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 **Documentation**
 
-- Updated [android-webrtc-requirements.md](android-webrtc-requirements.md) for Android team review (connection_secret, ICE, track ordering, HTTP fallback, stuck-connecting symptoms).
+- Updated the Android WebRTC requirements for Android team review (connection_secret, ICE, track ordering, HTTP fallback, stuck-connecting symptoms).
 
 <!-- RELEASE_END version=2.2.12 -->
 
 <!-- RELEASE_START version=2.2.11 -->
-## Version 2.2.11
+## v2.2.11 — 2026-06-15
 
 **Portal**
 
@@ -249,7 +367,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.11 -->
 
 <!-- RELEASE_START version=2.2.10 -->
-## Version 2.2.10
+## v2.2.10 — 2026-06-15
 
 **Server**
 
@@ -258,7 +376,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.10 -->
 
 <!-- RELEASE_START version=2.2.9 -->
-## Version 2.2.9
+## v2.2.9 — 2026-06-15
 
 **Portal**
 
@@ -273,7 +391,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.9 -->
 
 <!-- RELEASE_START version=2.2.8 -->
-## Version 2.2.8
+## v2.2.8 — 2026-06-15
 
 **Portal**
 
@@ -283,7 +401,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.8 -->
 
 <!-- RELEASE_START version=2.2.7 -->
-## Version 2.2.7
+## v2.2.7 — 2026-06-15
 
 **Portal**
 
@@ -293,7 +411,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.7 -->
 
 <!-- RELEASE_START version=2.2.6 -->
-## Version 2.2.6
+## v2.2.6 — 2026-06-15
 
 **Portal**
 
@@ -307,7 +425,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.6 -->
 
 <!-- RELEASE_START version=2.2.5 -->
-## Version 2.2.5
+## v2.2.5 — 2026-06-15
 
 **Portal**
 
@@ -317,7 +435,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.5 -->
 
 <!-- RELEASE_START version=2.2.4 -->
-## Version 2.2.4
+## v2.2.4 — 2026-06-15
 
 **Portal**
 
@@ -327,7 +445,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.4 -->
 
 <!-- RELEASE_START version=2.2.3 -->
-## Version 2.2.3
+## v2.2.3 — 2026-06-15
 
 **Portal**
 
@@ -342,7 +460,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.3 -->
 
 <!-- RELEASE_START version=2.2.2 -->
-## Version 2.2.2
+## v2.2.2 — 2026-06-14
 
 **Portal**
 
@@ -358,7 +476,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.2 -->
 
 <!-- RELEASE_START version=2.2.1 -->
-## Version 2.2.1
+## v2.2.1 — 2026-06-14
 
 **Documentation**
 
@@ -368,7 +486,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.1 -->
 
 <!-- RELEASE_START version=2.2.0 -->
-## Version 2.2.0
+## v2.2.0 — 2026-06-14
 
 **Portal**
 
@@ -382,7 +500,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.2.0 -->
 
 <!-- RELEASE_START version=2.1.1 -->
-## Version 2.1.1
+## v2.1.1 — 2026-06-14
 
 **Operations**
 
@@ -391,7 +509,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.1.1 -->
 
 <!-- RELEASE_START version=2.1.0 -->
-## Version 2.1.0
+## v2.1.0 — 2026-06-14
 
 **Deployment**
 
@@ -403,7 +521,7 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 <!-- RELEASE_END version=2.1.0 -->
 
 <!-- RELEASE_START version=2.0.0 -->
-## Version 2.0.0
+## v2.0.0 — 2026-06-14
 
 **Device API**
 

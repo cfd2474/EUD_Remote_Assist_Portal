@@ -1,8 +1,8 @@
 # EUD Remote Assist Portal
 
-**Release:** 3.1.3 (see [`VERSION`](VERSION) and [docs/versioning.md](docs/versioning.md))
+**Release:** 3.4.0 (see [`VERSION`](VERSION) and [docs/versioning.md](docs/versioning.md))
 
-Server-based web platform for remotely managing company-owned Android devices. Supports device registration, location tracking, ping requests, WebSocket command delivery, and WebRTC screen viewing with remote touch control. Now includes **Constrained Network Detection** and dynamic **STUN/TURN** server configuration for operating in bandwidth-limited environments like satellite links.
+Server-based web platform for remotely managing company-owned Android devices. Supports device registration, location tracking, ping requests, WebSocket command delivery, and WebRTC screen viewing with remote touch control. Includes **Constrained Network Detection** for bandwidth-limited links such as satellite, and a configurable **TURN server** for WebRTC relay that both the admin browser and the device use. External services (STUN, map tiles, address lookup, PhoneDB model names) are configurable or can be turned off for closed networks. See the *External services* block in [`.env.example`](.env.example).
 
 Protected by **OIDC (Authentik)** for admins. Device APIs authenticate via per-device `connection_secret`.
 
@@ -85,15 +85,16 @@ Portal: `http://localhost` (or your configured host)
 If you are deploying the portal on Microsoft Azure, Azure's Network Security Group (NSG) and default symmetric NAT require explicit port openings to allow WebRTC and signaling traffic to function correctly. You must configure the inbound port rules on your VM's NSG as follows:
 
 #### 1. Web Portal & Signaling
-These ports allow web traffic and the secure WebSockets required to negotiate WebRTC connections.
-*   **Port 8448 (TCP):** Required. Default portal application port.
-*   **Port 443 / 80 (TCP):** Required only if you are using an external reverse proxy or automatic SSL provisioning (e.g. Let's Encrypt).
+The stack itself publishes only `HTTP_PORT` (plain HTTP, ideally on loopback). Your TLS reverse proxy (host nginx or Caddy) serves the public ports:
+*   **Port 443 (TCP):** Required. Admin portal.
+*   **Port 8448 (TCP):** Required. Device API and device WebSocket. This is the port in `PUBLIC_BASE_URL` and in enrollment QR codes.
+*   **Port 80 (TCP):** Only if your proxy needs it for Let's Encrypt HTTP challenges.
 
 #### 2. WebRTC Media Relay / TURN Server
-Azure deployments typically require a TURN server (e.g., Coturn) to relay peer-to-peer video streams because direct UDP hole punching often fails across Azure's firewalls.
-*   **Port 3478 (UDP & TCP):** Required. Standard STUN/TURN negotiation.
-*   **Port 5349 (UDP & TCP):** Recommended. Secure TURN over TLS.
-*   **Ports 49152-65535 (UDP):** Required. Ephemeral port range used to relay the dynamic WebRTC media (video/audio) packets. If this UDP range is blocked, the remote view will permanently hang at "Connecting."
+Azure deployments typically need a TURN server (e.g. CoTURN) to relay video, because direct UDP hole punching often fails across Azure's NAT.
+*   **TURN listening port (UDP & TCP):** whatever port your TURN server listens on. 3478 is the standard; infra-TAK uses **3479**. Set the full URL (for example `turn:203.0.113.10:3479`) as `TURN_URL` in `.env`, or under Portal Configuration → TURN.
+*   **Port 5349 (TCP):** Only if you configure TURN over TLS (`turns:`).
+*   **Relay port range (UDP):** must match your TURN server's `min-port`/`max-port` (infra-TAK: 50000–50050; CoTURN's default: 49152–65535). Media relays over **UDP**, so open this range for UDP. If it's blocked, remote view hangs at "Connecting".
 
 Full steps: [docs/manual-install.md](docs/manual-install.md)  
 infra-TAK co-deploy: [docs/infratak-integration.md](docs/infratak-integration.md)
@@ -122,13 +123,14 @@ See:
 - [docs/manual-install.md](docs/manual-install.md) — server setup on Ubuntu 22.04
 - [docs/authentik-setup.md](docs/authentik-setup.md) — OIDC provider setup
 - [docs/mdm-config.md](docs/mdm-config.md) — Android MDM managed config
-- [docs/github-apk-config.md](docs/github-apk-config.md) — GitHub token per server (APK download / version checks)
+- [docs/app-hosting.md](docs/app-hosting.md) — the console hosts the app APK (no GitHub at runtime)
 
 ## Local development
 
 ```bash
 # Terminal 1 — database
-docker run -d --name cfd-pg -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=eud_remote_assist -e POSTGRES_USER=cfd -p 5432:5432 postgres:16-alpine
+# (matches DATABASE_URL in server/.env.example)
+docker run -d --name eud-pg -e POSTGRES_PASSWORD=cfd_secret -e POSTGRES_DB=eud_remote_assist -e POSTGRES_USER=cfd -p 5432:5432 postgres:16-alpine
 
 # Terminal 2 — API
 cd server && cp .env.example .env && npm install && npm run db:migrate && npm run dev
@@ -136,6 +138,22 @@ cd server && cp .env.example .env && npm install && npm run db:migrate && npm ru
 # Terminal 3 — Web
 cd web && cp .env.example .env && npm install && npm run dev
 ```
+
+### Tests
+
+```bash
+cd server && npm run typecheck && npm test   # DB tests are skipped without TEST_DATABASE_URL
+cd web && npm test
+```
+
+The enrollment tests need a disposable Postgres. They truncate tables, so the database name must contain `test`:
+
+```bash
+docker run -d --rm --name eud-test-pg -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=eud_test -p 127.0.0.1:55433:5432 postgres:16-alpine
+cd server && TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:55433/eud_test npm test
+```
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs all of this on every push to `dev` and `main`. A release must have a `vX.Y.Z` tag equal to `VERSION`. Push both together with `git push --atomic origin dev vX.Y.Z`.
 
 ## Project structure
 

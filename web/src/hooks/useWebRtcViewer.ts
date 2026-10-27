@@ -10,6 +10,8 @@ import {
   isDeviceRenegotiationOffer,
 } from "../utils/webrtcSignaling";
 import type { StreamDimensions } from "../utils/streamDimensions";
+import { getInboundVideoStats, requestInboundKeyFrame } from "../utils/webrtcPeer";
+import { useTimerSlot } from "./useTimerSlot";
 
 type StreamStatus =
   | "idle"
@@ -34,15 +36,27 @@ interface WebRtcOptions {
   layoutHint?: StreamDimensions | null;
   /** Increments on every ORIENTATION_CHANGED — triggers keyframe even when capture size is unchanged */
   layoutRevision?: number;
+  /** ICE servers from the server (STUN + configured TURN); the device gets the same list. */
+  iceServers?: RTCIceServer[];
 }
+
+/** Used until the server's ICE list has loaded, or if it could not be loaded. */
+const FALLBACK_ICE_SERVERS: RTCIceServer[] = [{ urls: "stun:stun.l.google.com:19302" }];
 
 const OFFER_DELAY_MS = 500;
 const CAPTURE_WARMUP_MS = 200;
+/**
+ * When the device reports webrtc_ready while our offer is still unanswered, give it this long to
+ * answer that offer before starting over. The app buffers offers that arrive before its capture
+ * pipeline is ready and answers them in order. Restarting at once sent a second offer whose
+ * answer then lost to the first one's, leaving ICE stuck in "connecting".
+ */
+const READY_ANSWER_GRACE_MS = 5_000;
 const OFFER_RETRY_MS = 15_000;
 const MAX_OFFER_ATTEMPTS = 4;
 const NEGOTIATION_TIMEOUT_MS = 45_000;
 
-const NO_ICE_ERROR =
+const NO_ICE_DETAIL =
   "SDP answer received but no video stream. The Android app must send ICE candidates " +
   '(onIceCandidate → { "type": "webrtc", "ice": { "candidate": "...", "sdpMid": "0", "sdpMLineIndex": 0 } }) ' +
   "on the same WebSocket after the answer, or via POST /api/v1/signaling.";
@@ -51,19 +65,32 @@ const ICE_WAIT_MS = 20_000;
 const STREAM_WAIT_MS = 25_000;
 const FRAME_WAIT_MS = 30_000;
 
-const NO_RTP_ERROR =
+const NO_RTP_DETAIL =
   "WebRTC connected but the device sent no video packets. The Android app likely fired " +
   '"Renegotiation Needed" after the SDP answer — add the screen track after setRemoteDescription(offer), ' +
   "then createAnswer(), or complete the pending renegotiation with a new answer.";
 
-const NO_STREAM_ERROR =
+const NO_STREAM_DETAIL =
   "WebRTC connected but no video track arrived. The Android app must attach screen capture " +
   "to the PeerConnection before createAnswer() and include a sendonly video m-line in the SDP answer.";
 
-const NO_ANSWER_ERROR =
+const NO_ANSWER_DETAIL =
   "The server delivered a WebRTC offer to the device, but no SDP answer came back. " +
   "The Android app must start screen capture after START_REMOTE_ADMIN and send " +
   '{ "type": "webrtc", "sdp": { "type": "answer", "sdp": "..." } } on the same WebSocket.';
+
+const ZERO_SIZE_DETAIL =
+  "WebRTC track received but no video frames (0×0). The Android app PeerConnection is up but screen capture is not feeding the video track.";
+
+/** What operators see. The developer detail above goes to the browser console. */
+const OPERATOR_MESSAGES = {
+  noAnswer:
+    "The device didn't respond to the remote-view request. Check that EUD Remote Assist is running and the device is unlocked, then select Connect again.",
+  noConnection:
+    "The device answered, but the video connection couldn't be established. A firewall or NAT may be blocking it; check the TURN server under Portal Configuration.",
+  noVideo:
+    "The connection is up, but the device isn't sending video. Make sure screen capture was allowed on the device, then reconnect.",
+} as const;
 
 export function useWebRtcViewer({
   sendSignaling,
@@ -76,16 +103,19 @@ export function useWebRtcViewer({
   serverAnswerReceived = false,
   layoutHint = null,
   layoutRevision = 0,
+  iceServers,
 }: WebRtcOptions) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const retryRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const scheduleDelayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const iceWaitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const streamWaitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const frameWaitRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const negotiationTimer = useTimerSlot();
+  const offerRetryTimer = useTimerSlot("interval");
+  const scheduleDelayTimer = useTimerSlot();
+  const iceWaitTimer = useTimerSlot();
+  const streamWaitTimer = useTimerSlot();
+  const frameWaitTimer = useTimerSlot();
   const offerAttemptRef = useRef(0);
+  /** When the current peer connection's offer was sent (0 = none outstanding). */
+  const offerSentAtRef = useRef(0);
   const receivedAnswerRef = useRef(false);
   const pendingAnswerRef = useRef<RTCSessionDescriptionInit | null>(null);
   const pendingIceRef = useRef<RTCIceCandidateInit[]>([]);
@@ -97,52 +127,29 @@ export function useWebRtcViewer({
   const streamActiveRef = useRef(false);
   const [status, setStatus] = useState<StreamStatus>("idle");
   const [error, setError] = useState<string | null>(null);
+  const failWith = useCallback((operatorMessage: string, developerDetail: string) => {
+    console.warn(`[WebRTC] ${developerDetail}`);
+    setError(operatorMessage);
+  }, []);
+  // A ref, so a late-arriving list doesn't recreate the session callbacks.
+  const iceServersRef = useRef<RTCIceServer[]>(FALLBACK_ICE_SERVERS);
+  iceServersRef.current = iceServers ?? FALLBACK_ICE_SERVERS;
 
   useEffect(() => {
     streamActiveRef.current = streamActive;
   }, [streamActive]);
 
-  const clearNegotiationTimeout = useCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-  }, []);
+  const clearNegotiationTimeout = negotiationTimer.clear;
 
-  const clearScheduleDelay = useCallback(() => {
-    if (scheduleDelayRef.current) {
-      clearTimeout(scheduleDelayRef.current);
-      scheduleDelayRef.current = null;
-    }
-  }, []);
+  const clearScheduleDelay = scheduleDelayTimer.clear;
 
-  const clearOfferRetry = useCallback(() => {
-    if (retryRef.current) {
-      clearInterval(retryRef.current);
-      retryRef.current = null;
-    }
-  }, []);
+  const clearOfferRetry = offerRetryTimer.clear;
 
-  const clearIceWait = useCallback(() => {
-    if (iceWaitRef.current) {
-      clearTimeout(iceWaitRef.current);
-      iceWaitRef.current = null;
-    }
-  }, []);
+  const clearIceWait = iceWaitTimer.clear;
 
-  const clearStreamWait = useCallback(() => {
-    if (streamWaitRef.current) {
-      clearTimeout(streamWaitRef.current);
-      streamWaitRef.current = null;
-    }
-  }, []);
+  const clearStreamWait = streamWaitTimer.clear;
 
-  const clearFrameWait = useCallback(() => {
-    if (frameWaitRef.current) {
-      clearTimeout(frameWaitRef.current);
-      frameWaitRef.current = null;
-    }
-  }, []);
+  const clearFrameWait = frameWaitTimer.clear;
 
   const enqueueSignaling = useCallback((fn: () => Promise<void>) => {
     signalingQueueRef.current = signalingQueueRef.current
@@ -162,35 +169,6 @@ export function useWebRtcViewer({
     }
   }, []);
 
-  const requestInboundKeyFrame = useCallback(async (pc: RTCPeerConnection) => {
-    for (const receiver of pc.getReceivers()) {
-      if (receiver.track?.kind !== "video") continue;
-      const requestKeyFrame = (
-        receiver as RTCRtpReceiver & { requestKeyFrame?: () => Promise<void> }
-      ).requestKeyFrame;
-      if (requestKeyFrame) {
-        try {
-          await requestKeyFrame.call(receiver);
-        } catch (err) {
-          console.warn("requestKeyFrame failed:", err);
-        }
-      }
-    }
-  }, []);
-
-  const getInboundVideoStats = useCallback(async (pc: RTCPeerConnection) => {
-    let bytesReceived = 0;
-    let framesDecoded = 0;
-    const stats = await pc.getStats();
-    stats.forEach((report) => {
-      if (report.type === "inbound-rtp" && report.kind === "video") {
-        bytesReceived += Number(report.bytesReceived ?? 0);
-        framesDecoded += Number(report.framesDecoded ?? 0);
-      }
-    });
-    return { bytesReceived, framesDecoded };
-  }, []);
-
   const markStreaming = useCallback(() => {
       setStreamActive(true);
       setStatus("streaming");
@@ -207,7 +185,7 @@ export function useWebRtcViewer({
   const scheduleFrameWait = useCallback(
     (pc: RTCPeerConnection, video: HTMLVideoElement) => {
       clearFrameWait();
-      frameWaitRef.current = setTimeout(() => {
+      frameWaitTimer.ref.current = setTimeout(() => {
         void (async () => {
           if (pcRef.current !== pc || !videoRef.current) return;
           if (video.videoWidth > 0 && video.videoHeight > 0) {
@@ -223,11 +201,7 @@ export function useWebRtcViewer({
 
           setStreamActive(false);
           setStatus("failed");
-          setError(
-            bytesReceived === 0
-              ? NO_RTP_ERROR
-              : "WebRTC track received but no video frames (0×0). The Android app PeerConnection is up but screen capture is not feeding the video track."
-          );
+          failWith(OPERATOR_MESSAGES.noVideo, bytesReceived === 0 ? NO_RTP_DETAIL : ZERO_SIZE_DETAIL);
         })();
       }, FRAME_WAIT_MS);
     },
@@ -296,10 +270,10 @@ export function useWebRtcViewer({
   const scheduleStreamWait = useCallback(
     (pc: RTCPeerConnection) => {
       clearStreamWait();
-      streamWaitRef.current = setTimeout(() => {
+      streamWaitTimer.ref.current = setTimeout(() => {
         if (pcRef.current !== pc) return;
         if (tryAttachFromReceivers(pc)) return;
-        setError(NO_STREAM_ERROR);
+        failWith(OPERATOR_MESSAGES.noVideo, NO_STREAM_DETAIL);
         setStatus("failed");
       }, STREAM_WAIT_MS);
     },
@@ -314,6 +288,7 @@ export function useWebRtcViewer({
     clearStreamWait();
     clearFrameWait();
     offerAttemptRef.current = 0;
+    offerSentAtRef.current = 0;
     receivedAnswerRef.current = false;
     pendingAnswerRef.current = null;
     pendingIceRef.current = [];
@@ -399,7 +374,7 @@ export function useWebRtcViewer({
           await flushPendingIce(pc);
           tryAttachFromReceivers(pc);
           scheduleStreamWait(pc);
-          iceWaitRef.current = setTimeout(() => {
+          iceWaitTimer.ref.current = setTimeout(() => {
             if (pcRef.current !== pc) return;
             if (
               pc.connectionState !== "connected" &&
@@ -407,7 +382,7 @@ export function useWebRtcViewer({
               pc.iceConnectionState !== "completed"
             ) {
               if (!tryAttachFromReceivers(pc)) {
-                setError(NO_ICE_ERROR);
+                failWith(OPERATOR_MESSAGES.noConnection, NO_ICE_DETAIL);
                 setStatus("failed");
               }
             }
@@ -502,14 +477,12 @@ export function useWebRtcViewer({
     setStatus("negotiating");
     offerAttemptRef.current += 1;
 
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
+    const pc = new RTCPeerConnection({ iceServers: iceServersRef.current });
     pcRef.current = pc;
 
-    timeoutRef.current = setTimeout(() => {
+    negotiationTimer.ref.current = setTimeout(() => {
       if (pcRef.current !== pc || receivedAnswerRef.current) return;
-      setError(receivedAnswerRef.current ? null : NO_ANSWER_ERROR);
+      if (!receivedAnswerRef.current) failWith(OPERATOR_MESSAGES.noAnswer, NO_ANSWER_DETAIL);
       setStatus("failed");
       setStreamActive(false);
     }, NEGOTIATION_TIMEOUT_MS);
@@ -580,6 +553,7 @@ export function useWebRtcViewer({
       await pc.setLocalDescription(offer);
       if (sessionGenRef.current !== gen) return;
       sendSignaling(outboundOffer(offer) as Record<string, unknown>);
+      offerSentAtRef.current = Date.now();
 
       const pending = pendingAnswerRef.current;
       if (pending) {
@@ -698,12 +672,12 @@ export function useWebRtcViewer({
 
     if (deviceStreamReady) return;
 
-    scheduleDelayRef.current = setTimeout(() => {
-      scheduleDelayRef.current = null;
+    scheduleDelayTimer.ref.current = setTimeout(() => {
+      scheduleDelayTimer.ref.current = null;
       if (receivedAnswerRef.current || deviceStreamReady) return;
       void startSessionRef.current?.();
 
-      retryRef.current = setInterval(() => {
+      offerRetryTimer.ref.current = setInterval(() => {
         if (receivedAnswerRef.current || deviceStreamReady) {
           clearOfferRetry();
           return;
@@ -743,10 +717,25 @@ export function useWebRtcViewer({
     if (receivedAnswerRef.current) return;
     clearScheduleDelay();
     clearOfferRetry();
-    setStatus("waiting");
+
+    // An offer the device hasn't answered yet is most likely buffered on the device and about to
+    // be answered; starting a new session now would race that answer (see READY_ANSWER_GRACE_MS).
+    const pc = pcRef.current;
+    const sinceOffer = Date.now() - offerSentAtRef.current;
+    const offerOutstanding =
+      !!pc && pc.signalingState === "have-local-offer" && offerSentAtRef.current > 0 &&
+      sinceOffer < READY_ANSWER_GRACE_MS;
+    if (offerOutstanding) {
+      console.log(`[WebRTC] Device ready with our offer outstanding; waiting up to ${READY_ANSWER_GRACE_MS - sinceOffer} ms for its answer`);
+    } else {
+      setStatus("waiting");
+    }
+    const delay = offerOutstanding ? READY_ANSWER_GRACE_MS - sinceOffer : CAPTURE_WARMUP_MS;
     const warmup = window.setTimeout(() => {
-      if (!receivedAnswerRef.current) void startSessionRef.current?.();
-    }, CAPTURE_WARMUP_MS);
+      if (receivedAnswerRef.current) return;
+      if (offerOutstanding) console.log("[WebRTC] No answer to the outstanding offer; starting a new session");
+      void startSessionRef.current?.();
+    }, delay);
     return () => window.clearTimeout(warmup);
   }, [deviceStreamReady, enabled, signalingReady, streamActive, clearScheduleDelay, clearOfferRetry]);
 

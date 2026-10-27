@@ -76,19 +76,39 @@ export interface LocationHistoryPoint {
   recorded_at: string;
 }
 
+/** The app build this console hosts (imported from dist/ with each portal release). */
 export interface LatestApkRelease {
   version: string;
+  versionCode: number;
   filename: string;
+  /** Device-reachable download (PUBLIC_BASE_URL/api/v1/app/apk). */
   downloadUrl: string;
   releaseTag: string;
   releaseNotes: string;
+  sha256: string;
+  signerSha256: string;
+  size: number;
+  importedAt: string;
 }
 
-export interface PortalGithubConfig {
-  apkRepo: string;
-  tokenConfigured: boolean;
-  tokenSource: "environment" | "portal" | null;
-  serverPort: number;
+export type SettingSource = "environment" | "portal" | null;
+
+export interface PortalConfig {
+  /** Device API base URL (PUBLIC_BASE_URL); the enrollment QR uses it. */
+  publicBaseUrl: string;
+  devicePort: number | null;
+  /** Retired Server Port setting saved before 3.2.0, if any. Read-only. */
+  legacyServerPort: number | null;
+  serverPortMismatch: boolean;
   turnServerUrl: string;
   turnCredentialConfigured: boolean;
+  turnSource: SettingSource;
+}
+
+/** Runtime settings from GET /api/admin/client-config. */
+export interface ClientConfig {
+  publicBaseUrl: string;
+  iceServers: RTCIceServer[];
+  mapTiles: { url: string; attribution: string } | null;
+  geocoderEnabled: boolean;
 }

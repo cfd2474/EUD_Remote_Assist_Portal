@@ -101,4 +101,4 @@ The app requests a broad permission set so support staff can fully assist a devi
 
 ---
 
-*EUD Remote Assist App · TAK-Solutions · mike@tak-solutions.com*
+*EUD Remote Assist App · TAK-Solutions*

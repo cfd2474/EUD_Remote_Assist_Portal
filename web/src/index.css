@@ -342,6 +342,22 @@ button:hover {
   margin-bottom: 1.25rem;
 }
 
+.portal-config-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.4rem 1rem;
+  margin: 0;
+}
+
+.portal-config-details dt {
+  color: var(--text-muted);
+}
+
+.portal-config-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .portal-config-instructions {
   margin-bottom: 1.25rem;
   padding: 1rem 1.1rem;

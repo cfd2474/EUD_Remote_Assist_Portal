@@ -1,3 +1,6 @@
+import { config } from "../config.js";
+import { VERSION } from "../version.js";
+
 interface NominatimAddress {
   house_number?: string;
   road?: string;
@@ -32,6 +35,18 @@ function formatAddress(data: NominatimResponse): string {
   return data.display_name ?? "Address unavailable";
 }
 
+/** Nominatim policy: identify the application. Default names this deployment, not a fixed host. */
+function geocoderUserAgent(): string {
+  if (config.geocoder.userAgent) return config.geocoder.userAgent;
+  let deployment = "unconfigured deployment";
+  try {
+    deployment = new URL(config.publicBaseUrl).host;
+  } catch {
+    // PUBLIC_BASE_URL unset or invalid; keep the generic label.
+  }
+  return `EUD-Remote-Assist-Portal/${VERSION} (${deployment})`;
+}
+
 export async function reverseGeocode(
   lat: number,
   lon: number
@@ -42,7 +57,11 @@ export async function reverseGeocode(
     return cached.address;
   }
 
-  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  if (!config.geocoder.url) {
+    return null;
+  }
+
+  const url = new URL(config.geocoder.url);
   url.searchParams.set("format", "json");
   url.searchParams.set("lat", String(lat));
   url.searchParams.set("lon", String(lon));
@@ -50,10 +69,7 @@ export async function reverseGeocode(
   url.searchParams.set("addressdetails", "1");
 
   const res = await fetch(url, {
-    headers: {
-      "User-Agent":
-        "EUD-Remote-Assist-Portal/1.0 (https://remote.tak-solutions.com)",
-    },
+    headers: { "User-Agent": geocoderUserAgent() },
   });
 
   if (!res.ok) {
