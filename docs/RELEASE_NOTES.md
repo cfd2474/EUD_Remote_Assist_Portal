@@ -6,6 +6,18 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 ---
 
+<!-- RELEASE_START version=3.4.0 -->
+## v3.4.0 — 2026-10-26
+
+**Portal**, with **app 3.4.0** included. Devices on 3.3.0 are offered the update automatically.
+
+- **Ping now rings through silent mode and Do Not Disturb.** A pinged device keeps ringing at full alarm volume until someone acknowledges it, even when it's on silent or vibrate, or in Do Not Disturb set to "alarms only" or "priority". Its volume and Do Not Disturb settings are put back afterwards. Devices need the new **Do Not Disturb Access** permission control in the app.
+- **One exception, set by Android:** on Android 15 and later, a device the user has put in Do Not Disturb **"Total silence"** can't be rung. Android no longer allows any app to override that mode. See the Administrator Guide, under Ping.
+- **The app download is half the size** (about 35 MB instead of 72 MB).
+
+**Upgrading:** no configuration changes. Devices already registered keep working. Their Permission Controls show **Do Not Disturb Access** as missing until it's allowed on the device; new registrations need it.
+<!-- RELEASE_END version=3.4.0 -->
+
 <!-- RELEASE_START version=3.3.0 -->
 ## v3.3.0 — 2026-10-26
 

@@ -1,6 +1,6 @@
 # EUD Remote Assist Portal — Administrator Guide
 
-**Release 3.3.0**
+**Release 3.4.0**
 
 The Remote Assist Portal is the web console for managing your fleet of company-owned Android devices. From a single browser you can see where every device is, confirm it's online, push a ping or location request, and take live control of the screen for hands-on support.
 
@@ -81,6 +81,10 @@ The device info list displays specific metadata elements. The **Device Name** is
 
 ### Ping
 Sends `TRIGGER_PING`. The device alerts so the user (or you, if it's nearby) can find it. The device replies with a `PING_ACKNOWLEDGED` event once the user responds.
+
+With app 3.4.0 or later, the device keeps ringing at full alarm volume until someone acknowledges it or it times out after 2 minutes. It rings even when the phone is on silent or vibrate, or in Do Not Disturb set to "alarms only" or "priority". Afterwards it puts the volume and Do Not Disturb back exactly as they were.
+
+The device needs **Do Not Disturb Access**, one of the app's Permission Controls. The one exception: on **Android 15 and later**, a phone the user has put in Do Not Disturb **"Total silence"** can't be rung. Android no longer lets any app override that setting. On Android 11–14 it rings through Total silence as well.
 
 ### Locate
 Sends `REQUEST_LOCATION` for an immediate position fix rather than waiting for the next scheduled pulse. Useful when a device just moved or hasn't checked in recently.

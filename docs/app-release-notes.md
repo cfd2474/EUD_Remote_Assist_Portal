@@ -9,6 +9,13 @@ Notes for app versions before 3.1.4 are in those releases, and in the portal not
 
 ---
 
+## v3.4.0 — 2026-10-26
+
+- **The device locator rings through silent mode and Do Not Disturb.** A ping now plays at full alarm volume even when the phone is silenced. Before, a phone in Do Not Disturb stayed silent, and a silenced phone played only at the quietest alarm level. Afterwards your volume and Do Not Disturb settings are put back exactly as they were.
+- **One exception, set by Android:** on Android 15 and later, a phone in Do Not Disturb **"Total silence"** can't be rung, because Android no longer lets apps override it. Android's usual Do Not Disturb setting allows alarms, so the locator still rings in that mode.
+- **New permission control: Do Not Disturb Access.** Tap it once and allow EUD Remote Assist in the screen that opens. It's required to register, like the other controls. Devices already registered keep working, but show it as missing until it's allowed.
+- **Smaller download:** the app is about half its previous size (it no longer includes code that only emulators use).
+
 ## v3.3.0 — 2026-10-26
 
 - **The app tells you when your console has a newer version.** When the EUD Remote Assist console (portal 3.3.0 or later) hosts a newer build, the app shows **Update available** with a **Download update** button. The download comes from your own console, not the internet. Android then asks you to install it. Devices managed by MDM can keep updating through MDM as before.
