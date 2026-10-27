@@ -1,14 +1,13 @@
 import { Navigate, useParams } from "react-router-dom";
 import { DocumentationToolbar } from "../components/DocumentationToolbar";
 import { MarkdownGuide } from "../components/MarkdownGuide";
-import { useLiveReleaseNotes } from "../hooks/useLiveDocs";
+import { releaseNotes } from "../guides/releaseNotes";
 
 export function ReleaseNotesVersion() {
   const { version } = useParams<{ version: string }>();
-  const { notes, status } = useLiveReleaseNotes();
-  const note = notes.find((n) => n.version === version);
+  const note = releaseNotes.find((n) => n.version === version);
 
-  if (!note && status !== "checking") {
+  if (!note) {
     return <Navigate to="/documentation/release-notes" replace />;
   }
 
@@ -21,18 +20,11 @@ export function ReleaseNotesVersion() {
           backTo="/documentation/release-notes"
           backLabel="← Release Notes"
           openInNewTabHref={pagePath}
-          status={status}
         />
       </div>
 
       <section className="panel guide-panel">
-        {note ? (
-          <MarkdownGuide content={note.content} />
-        ) : (
-          <p style={{ color: "var(--text-muted)", fontSize: "0.95rem" }}>
-            Checking GitHub for version {version} release notes...
-          </p>
-        )}
+        <MarkdownGuide content={note.content} />
       </section>
     </div>
   );

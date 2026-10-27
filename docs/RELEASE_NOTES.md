@@ -6,6 +6,14 @@ Running changelog for the **portal server and admin UI**. Update this file on ev
 
 ---
 
+<!-- RELEASE_START version=3.4.1 -->
+## v3.4.1 — 2026-10-27
+
+**Portal** (app unchanged at 3.4.0; no configuration changes)
+
+- **The guides and release notes are the copies built into the portal.** The Documentation pages no longer download newer versions from GitHub, so they work the same on networks without internet access. The "Updated from GitHub" badge is gone. Each portal update brings its own matching documentation.
+<!-- RELEASE_END version=3.4.1 -->
+
 <!-- RELEASE_START version=3.4.0 -->
 ## v3.4.0 — 2026-10-26
 
