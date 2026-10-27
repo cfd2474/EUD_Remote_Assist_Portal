@@ -35,4 +35,10 @@ curl -s https://<device-host>:8448/api/v1/app/latest
 
 - `GITHUB_APK_REPO` and `GITHUB_TOKEN` are no longer read. They can stay in `.env`, where they are harmless.
 - A GitHub token saved in Portal Configuration is removed from `data/portal-settings.json` at the first start.
-- GitHub releases (`eud_X.Y.Z`) are still published for portals older than 3.3.0.
+- GitHub releases (`eud_X.Y.Z`) are still published, for portals older than 3.3.0 and for infra-TAK.
+  - **infra-TAK follows the newest published release** (from infra-TAK PR #303). It checks that `VERSION` at the release's tag matches the release name and skips the release otherwise.
+  - So each `eud_X.Y.Z` must be created **on the public release commit** for `vX.Y.Z`, never on `main` by default:
+    ```
+    gh release create eud_X.Y.Z <apk> -R cfd2474/EUD_Remote_Assist_Portal --target <public vX.Y.Z commit> …
+    ```
+  - Since 3.3.0, the app and portal versions match, so `eud_X.Y.Z` and `vX.Y.Z` name the same release.

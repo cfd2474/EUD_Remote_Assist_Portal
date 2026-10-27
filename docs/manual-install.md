@@ -99,11 +99,14 @@ When new code is pushed to the repo:
 
 ```bash
 cd /opt/eud-remote-assist
-git pull
-cat VERSION   # expected release after pull
+git fetch origin main
+git reset --hard origin/main   # keeps .env, data/ and docker-compose.override.yml (untracked/ignored)
+cat VERSION   # expected release after the update
 docker compose up -d --build
 curl -sS http://127.0.0.1:8091/version   # confirm running version matches VERSION
 ```
+
+Use `fetch` + `reset`, not `git pull`. The repository was rebuilt with fresh history on 2026-10-26, so `git pull` on an older clone fails with "unrelated histories". `reset --hard` also discards local edits to tracked files: keep site settings in `.env` and `docker-compose.override.yml`.
 
 Database migrations run automatically when the server container starts.
 

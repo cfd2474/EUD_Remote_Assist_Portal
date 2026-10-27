@@ -128,16 +128,37 @@ The portal sends **one ICE list** (STUN plus TURN) to both the admin browser and
 - Never assume port 3478. Read the TURN host and port from configuration.
 - Don't rely on TCP relay.
 
-### Notice for infra-TAK maintainers: Remote Assist 3.2.0
+### Notice for infra-TAK maintainers: Remote Assist 3.2.0 to 3.4.0, and the repository
 
-Everything below is **additive**. A box that changes nothing behaves as before, except that TURN now works.
+A box still on 3.1.4 will receive all of this in one Update when these releases reach `main`. Nothing requires an infra-TAK change. The items marked **optional** are improvements you can make, and **check** marks one thing we couldn't test ourselves.
 
+**Repository**
 | Change | Effect on infra-TAK |
 |---|---|
-| New optional env vars: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`, `STUN_URLS`, `MAP_TILE_URL`, `MAP_TILE_ATTRIBUTION`, `GEOCODER_URL`, `GEOCODER_USER_AGENT`, `PHONEDB_ENABLED` | None until you write them. Empty means the built-in default; `none` turns a service off. Writing `TURN_URL`/`TURN_USERNAME`/`TURN_CREDENTIAL` from your CoTURN fields would make credential rotation reach the portal automatically. |
+| `cfd2474/EUD_Remote_Assist_Portal` was rebuilt on 2026-10-26 with **fresh git history**: one commit per release. Same URL and branches (`main`, `dev`). Release tags from 3.1.4 on (`v3.1.4`, `v3.2.5`, `v3.3.0`, `v3.4.0`) and the app releases `eud_2.0.0` to `eud_3.4.0` are there. Development moved to a private repository. | None for installs and updates. Your update path (`fetch origin main --depth 1` → `reset --hard origin/main`) moves an existing clone onto the new history; we tested it against the live repository, and `.env` and `docker-compose.override.yml` are kept. A plain `git pull` on a full clone would fail with "unrelated histories". infra-TAK doesn't use it. |
+
+**3.2.0: network configuration** (all additive)
+| Change | Effect on infra-TAK |
+|---|---|
+| New optional env vars: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`, `STUN_URLS`, `MAP_TILE_URL`, `MAP_TILE_ATTRIBUTION`, `GEOCODER_URL`, `GEOCODER_USER_AGENT`, `PHONEDB_ENABLED` | None until you write them. Empty means the built-in default; `none` turns a service off. **Optional:** writing `TURN_URL`/`TURN_USERNAME`/`TURN_CREDENTIAL` from your CoTURN fields makes credential rotation reach the portal automatically. |
 | `PHONEDB_TLS_INSECURE` compose default `true` → `false` | None. You already write `false`. |
 | `PUT /api/admin/portal-config/server-port` now returns **410**. The device URL comes only from `PUBLIC_BASE_URL`. | None. infra-TAK doesn't call it and already writes `PUBLIC_BASE_URL`. |
-| The browser and device both get the TURN server, with `urls` as an array | Calls may now relay through your CoTURN (UDP 50000–50050) where they used to fail. |
+| The browser and the device both get the TURN server, with `urls` as an array | Calls may now relay through your CoTURN (UDP 50000–50050) where they used to fail. |
+
+**3.3.0: the portal hosts the Android app**
+| Change | Effect on infra-TAK |
+|---|---|
+| The release-signed app is committed at `dist/eud-remote-assist.apk`, in the same commit and tag as the portal release. Compose mounts `./dist:/seed:ro` into the server, which imports the APK into `./data/apk/` at startup (after checking its package and signing certificate). | None: both folders are inside the clone, and `./data` was already mounted. **Check:** on SELinux hosts (Rocky), the new `./dist` mount needs the same labelling as `./data`. We couldn't test a Rocky host. |
+| Devices and admins download the app from the portal: `GET /api/v1/app/apk` and `GET /api/v1/app/latest`, unauthenticated, on the device port | None. Your Caddy `@ra_device` matcher (`/api/v1/*`) on :8448 already forwards them. No GitHub API calls at runtime any more. |
+| `GITHUB_APK_REPO` and `GITHUB_TOKEN` are no longer read. A token saved in Portal Configuration is deleted at first start. | None. **Optional:** stop writing `GITHUB_APK_REPO` to `.env`. |
+| The checkout now carries the APK | A shallow update that brings a new app downloads about 20 MB (the APK compresses in transfer); a full checkout is about 36 MB. |
+
+**3.4.0: app only**
+| Change | Effect on infra-TAK |
+|---|---|
+| App 3.4.0 (device locator rings through silent mode and Do Not Disturb; APK 72 → 35 MB) | None. |
+
+3.2.1 to 3.2.5 were fixes inside the portal and need nothing from infra-TAK.
 
 ---
 
@@ -239,7 +260,7 @@ ss -tlnp | grep 8767          # must show 127.0.0.1:8767 only
 curl -sS http://127.0.0.1:8767/health
 curl -sS http://127.0.0.1:8767/version
 
-git pull --ff-only              # must succeed — clean working tree
+git fetch origin main --depth 1 && git reset --hard origin/main   # what infra-TAK's Update runs
 docker compose up -d --build
 curl -sS http://127.0.0.1:8767/version | jq -r .version
 cat VERSION                     # must match

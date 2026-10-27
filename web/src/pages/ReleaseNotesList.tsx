@@ -1,25 +1,13 @@
 import { Link } from "react-router-dom";
-import { useLiveReleaseNotes } from "../hooks/useLiveDocs";
+import { releaseNotes as notes } from "../guides/releaseNotes";
 
 export function ReleaseNotesList() {
-  const { notes, status } = useLiveReleaseNotes();
-
   return (
     <div className="page release-notes-page">
       <div className="page-header documentation-guide-header">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-          <p className="documentation-guide-back">
-            <Link to="/documentation">← Documentation</Link>
-          </p>
-          {status && (
-            <span className={`doc-update-badge doc-update-badge-${status}`}>
-              {status === "checking" && "Checking for updates..."}
-              {status === "updated" && "Updated from GitHub"}
-              {status === "failed" && "Offline (using cached version)"}
-              {status === "cached" && "Using cached version"}
-            </span>
-          )}
-        </div>
+        <p className="documentation-guide-back">
+          <Link to="/documentation">← Documentation</Link>
+        </p>
         <h1>Release Notes</h1>
         <p>Select a version to view its changes.</p>
       </div>
